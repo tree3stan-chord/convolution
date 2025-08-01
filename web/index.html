@@ -113,6 +113,8 @@
         let currentBuffer = null;
         let currentSource = null;
         let isPlaying = false;
+        let analyser = null;
+        let animationId = null;
 
         // Wait for DOM to load
         document.addEventListener('DOMContentLoaded', () => {
@@ -220,15 +222,23 @@
                     try {
                         const processed = processor.processAudio(input);
                         output.set(processed.subarray(0, output.length));
-                        updateVisualizer(output);
                     } catch (error) {
                         output.set(input); // Passthrough on error
                     }
                 };
                 
+                // Create analyser for visualization
+                analyser = audioContext.createAnalyser();
+                analyser.fftSize = 2048;
+                analyser.smoothingTimeConstant = 0.8;
+                
                 // Connect nodes
                 micSource.connect(scriptProcessor);
                 scriptProcessor.connect(audioContext.destination);
+                scriptProcessor.connect(analyser);
+                
+                // Start visualization
+                startLiveVisualization();
                 
                 isProcessingLive = true;
                 updateStatus('ready', 'Processing live input with reverb');
@@ -252,6 +262,13 @@
         function stopLiveInput() {
             isProcessingLive = false;
             
+            stopVisualization();
+            
+            if (analyser) {
+                analyser.disconnect();
+                analyser = null;
+            }
+            
             if (scriptProcessor) {
                 scriptProcessor.disconnect();
                 scriptProcessor = null;
@@ -271,6 +288,9 @@
             document.getElementById('liveInputButton').textContent = 'Start Live Input';
             document.getElementById('liveInputButton').classList.remove('active');
             document.getElementById('processButton').disabled = currentBuffer == null;
+            
+            // Restart idle animation
+            animateIdleWaveform();
         }
 
         // Handle file selection
@@ -333,21 +353,40 @@
         function playBuffer(buffer) {
             stopAudio();
             
+            // Create analyser for visualization
+            analyser = audioContext.createAnalyser();
+            analyser.fftSize = 2048;
+            analyser.smoothingTimeConstant = 0.8;
+            
             currentSource = audioContext.createBufferSource();
             currentSource.buffer = buffer;
-            currentSource.connect(audioContext.destination);
+            currentSource.connect(analyser);
+            analyser.connect(audioContext.destination);
+            
             currentSource.onended = () => {
                 isPlaying = false;
                 document.getElementById('processButton').textContent = 'Process Audio';
+                stopVisualization();
+                animateIdleWaveform();
             };
             
             currentSource.start(0);
             isPlaying = true;
             document.getElementById('processButton').textContent = 'Stop';
+            
+            // Start visualization
+            startPlaybackVisualization();
         }
 
         // Stop audio
         function stopAudio() {
+            stopVisualization();
+            
+            if (analyser) {
+                analyser.disconnect();
+                analyser = null;
+            }
+            
             if (currentSource) {
                 currentSource.stop();
                 currentSource.disconnect();
@@ -355,6 +394,9 @@
             }
             isPlaying = false;
             document.getElementById('processButton').textContent = 'Process Audio';
+            
+            // Restart idle animation
+            animateIdleWaveform();
         }
 
         // Setup parameter controls
@@ -444,6 +486,9 @@
             
             window.addEventListener('resize', resize);
             resize();
+            
+            // Start idle animation
+            animateIdleWaveform();
         }
 
         // Draw empty waveform
@@ -460,32 +505,121 @@
             ctx.stroke();
         }
 
-        // Update visualizer
-        function updateVisualizer(data) {
+        // Start live visualization
+        function startLiveVisualization() {
+            stopVisualization();
+            
             const canvas = document.getElementById('waveformCanvas');
             const ctx = canvas.getContext('2d');
+            const bufferLength = analyser.frequencyBinCount;
+            const dataArray = new Float32Array(bufferLength);
             
-            ctx.fillStyle = 'rgba(0, 0, 0, 0.1)';
-            ctx.fillRect(0, 0, canvas.width, canvas.height);
-            
-            ctx.strokeStyle = '#90e0ef';
-            ctx.lineWidth = 2;
-            ctx.beginPath();
-            
-            const sliceWidth = canvas.width / data.length;
-            let x = 0;
-            
-            for (let i = 0; i < data.length; i++) {
-                const y = (1 + data[i]) * canvas.height / 2;
-                if (i === 0) {
-                    ctx.moveTo(x, y);
-                } else {
-                    ctx.lineTo(x, y);
+            function draw() {
+                animationId = requestAnimationFrame(draw);
+                
+                analyser.getFloatTimeDomainData(dataArray);
+                
+                // Clear with fade effect
+                ctx.fillStyle = 'rgba(0, 0, 0, 0.1)';
+                ctx.fillRect(0, 0, canvas.width, canvas.height);
+                
+                // Draw waveform
+                ctx.lineWidth = 2;
+                ctx.strokeStyle = '#90e0ef';
+                ctx.beginPath();
+                
+                const sliceWidth = canvas.width / bufferLength;
+                let x = 0;
+                
+                for (let i = 0; i < bufferLength; i++) {
+                    const v = dataArray[i];
+                    const y = (v + 1) / 2 * canvas.height;
+                    
+                    if (i === 0) {
+                        ctx.moveTo(x, y);
+                    } else {
+                        ctx.lineTo(x, y);
+                    }
+                    
+                    x += sliceWidth;
                 }
-                x += sliceWidth;
+                
+                ctx.stroke();
+                
+                // Add glow effect
+                ctx.shadowBlur = 15;
+                ctx.shadowColor = '#90e0ef';
+                ctx.stroke();
+                ctx.shadowBlur = 0;
             }
             
-            ctx.stroke();
+            draw();
+        }
+        
+        // Start playback visualization
+        function startPlaybackVisualization() {
+            stopVisualization();
+            
+            const canvas = document.getElementById('waveformCanvas');
+            const ctx = canvas.getContext('2d');
+            const bufferLength = analyser.frequencyBinCount;
+            const dataArray = new Uint8Array(bufferLength);
+            
+            function draw() {
+                animationId = requestAnimationFrame(draw);
+                
+                analyser.getByteTimeDomainData(dataArray);
+                
+                // Clear canvas
+                ctx.fillStyle = 'rgba(0, 0, 0, 0.05)';
+                ctx.fillRect(0, 0, canvas.width, canvas.height);
+                
+                // Draw waveform
+                ctx.lineWidth = 2;
+                ctx.strokeStyle = '#90e0ef';
+                ctx.beginPath();
+                
+                const sliceWidth = canvas.width / bufferLength;
+                let x = 0;
+                
+                for (let i = 0; i < bufferLength; i++) {
+                    const v = dataArray[i] / 128.0;
+                    const y = v * canvas.height / 2;
+                    
+                    if (i === 0) {
+                        ctx.moveTo(x, y);
+                    } else {
+                        ctx.lineTo(x, y);
+                    }
+                    
+                    x += sliceWidth;
+                }
+                
+                ctx.stroke();
+                
+                // Add center line
+                ctx.strokeStyle = 'rgba(144, 224, 239, 0.2)';
+                ctx.lineWidth = 1;
+                ctx.beginPath();
+                ctx.moveTo(0, canvas.height / 2);
+                ctx.lineTo(canvas.width, canvas.height / 2);
+                ctx.stroke();
+            }
+            
+            draw();
+        }
+        
+        // Stop visualization
+        function stopVisualization() {
+            if (animationId) {
+                cancelAnimationFrame(animationId);
+                animationId = null;
+            }
+        }
+        
+        // Update visualizer (remove old function)
+        function updateVisualizer(data) {
+            // This function is no longer needed as we use analyser
         }
 
         // Draw waveform
@@ -495,6 +629,15 @@
             const data = buffer.getChannelData(0);
             
             ctx.clearRect(0, 0, canvas.width, canvas.height);
+            
+            // Draw gradient background
+            const gradient = ctx.createLinearGradient(0, 0, 0, canvas.height);
+            gradient.addColorStop(0, 'rgba(144, 224, 239, 0.1)');
+            gradient.addColorStop(0.5, 'rgba(144, 224, 239, 0.05)');
+            gradient.addColorStop(1, 'rgba(144, 224, 239, 0.1)');
+            ctx.fillStyle = gradient;
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            
             ctx.strokeStyle = '#90e0ef';
             ctx.lineWidth = 2;
             
@@ -517,6 +660,57 @@
             }
             
             ctx.stroke();
+        }
+        
+        // Animated idle waveform
+        function animateIdleWaveform() {
+            stopVisualization();
+            
+            const canvas = document.getElementById('waveformCanvas');
+            const ctx = canvas.getContext('2d');
+            let phase = 0;
+            
+            function draw() {
+                if (isProcessingLive || isPlaying) {
+                    return;
+                }
+                
+                animationId = requestAnimationFrame(draw);
+                
+                ctx.fillStyle = 'rgba(15, 15, 26, 0.1)';
+                ctx.fillRect(0, 0, canvas.width, canvas.height);
+                
+                // Draw animated sine wave
+                ctx.strokeStyle = 'rgba(144, 224, 239, 0.3)';
+                ctx.lineWidth = 2;
+                ctx.beginPath();
+                
+                for (let x = 0; x < canvas.width; x++) {
+                    const y = canvas.height / 2 + 
+                             Math.sin((x / canvas.width) * Math.PI * 4 + phase) * 20 * 
+                             Math.sin((x / canvas.width) * Math.PI);
+                    
+                    if (x === 0) {
+                        ctx.moveTo(x, y);
+                    } else {
+                        ctx.lineTo(x, y);
+                    }
+                }
+                
+                ctx.stroke();
+                
+                // Add center line
+                ctx.strokeStyle = 'rgba(144, 224, 239, 0.2)';
+                ctx.lineWidth = 1;
+                ctx.beginPath();
+                ctx.moveTo(0, canvas.height / 2);
+                ctx.lineTo(canvas.width, canvas.height / 2);
+                ctx.stroke();
+                
+                phase += 0.05;
+            }
+            
+            draw();
         }
     </script>
 </body>
