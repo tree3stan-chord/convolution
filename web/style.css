@@ -518,3 +518,43 @@ select:focus-visible {
         display: none;
     }
 }
+
+.preloaded-audio {
+    text-align: center;
+    padding: 15px;
+    background: rgba(255, 255, 255, 0.02);
+    border-radius: 8px;
+    margin-top: 20px;
+}
+
+.preloaded-audio label {
+    color: #cad3f5;
+    font-weight: 500;
+}
+
+.preloaded-audio select {
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    color: #cad3f5;
+    padding: 8px 15px;
+    border-radius: 4px;
+    font-size: 14px;
+    cursor: pointer;
+    transition: all 0.3s ease;
+}
+
+.preloaded-audio select:hover {
+    background: rgba(255, 255, 255, 0.08);
+    border-color: rgba(255, 255, 255, 0.2);
+}
+
+.preloaded-audio select:focus {
+    outline: none;
+    border-color: #90e0ef;
+    box-shadow: 0 0 0 2px rgba(144, 224, 239, 0.2);
+}
+
+.preloaded-audio select option {
+    background: #1e1e2e;
+    color: #cad3f5;
+}

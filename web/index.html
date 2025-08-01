@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Convolution Reverb Playground</title>
+    <title>Convolution Reverb Explorer</title>
     <link rel="stylesheet" href="style.css">
     <link rel="icon" type="image/x-icon" href="/favicon.ico">
 </head>
@@ -78,6 +78,14 @@
             <button class="button secondary" id="resetButton">Reset Parameters</button>
         </div>
 
+        <div class="preloaded-audio" style="margin-top: 20px;">
+            <label for="preloadedSelect">Or select a preloaded track:</label>
+            <select id="preloadedSelect" style="margin-left: 10px;">
+                <option value="">-- Select Audio File --</option>
+            </select>
+            <button class="button secondary" id="loadPreloadedButton" style="margin-left: 10px;" disabled>Load Selected</button>
+        </div>
+
         <input type="file" id="audioFileInput" accept="audio/*" style="display: none;">
 
         <div class="visualizer">
@@ -101,24 +109,20 @@
                     <p><strong>Sample Rate:</strong> <span id="sampleRate">-</span> Hz</p>
                     <p><strong>Processing:</strong> <span id="processingType">-</span></p>
                     <p><strong>Latency:</strong> <span id="latency">-</span> ms</p>
-                    <p style="margin-top: 8px; font-size: 0.9em; opacity: 0.8;">
-                        Note: The current implementation uses a simplified C convolution algorithm compiled to WebAssembly. 
-                        The original Fortran code requires specialized toolchain support for WASM compilation.
-                    </p>
                 </div>
             </details>
         </div>
     </div>
 
-    <!-- Load scripts that don't create AudioContext -->
-    <script src="convolution_reverb.js"></script>
-    <script src="convolution-module.js"></script>
+    <!-- Load scripts with cache busting -->
+    <script src="convolution_reverb.js?v=2.0.0"></script>
+    <script src="convolution-module.js?v=2.0.0"></script>
     
     <!-- Main application script -->
     <script>
-        // Global state
+        // Global state - MAKE PROCESSOR GLOBAL
         let audioContext = null;
-        let processor = null;
+        window.processor = null;  // GLOBAL PROCESSOR
         let micStream = null;
         let micSource = null;
         let scriptProcessor = null;
@@ -144,6 +148,7 @@
                 document.getElementById('audioFileInput').click();
             });
             document.getElementById('resetButton').addEventListener('click', resetParameters);
+            document.getElementById('loadPreloadedButton').addEventListener('click', loadPreloadedAudio);
             
             // Setup file input
             document.getElementById('audioFileInput').addEventListener('change', handleFileSelect);
@@ -153,6 +158,75 @@
             
             // Setup visualizer
             setupVisualizer();
+            
+            // Load preloaded audio list
+            loadAudioList();
+        }
+
+        // Load list of preloaded audio files
+        async function loadAudioList() {
+            try {
+                const response = await fetch('/audio/list.php');
+                if (response.ok) {
+                    const files = await response.json();
+                    const select = document.getElementById('preloadedSelect');
+                    
+                    // Clear existing options except the first
+                    select.innerHTML = '<option value="">-- Select Audio File --</option>';
+                    
+                    // Add audio files
+                    files.forEach(file => {
+                        const option = document.createElement('option');
+                        option.value = file;
+                        option.textContent = file.replace('.wav', '').replace(/_/g, ' ');
+                        select.appendChild(option);
+                    });
+                    
+                    // Enable/disable load button based on selection
+                    select.addEventListener('change', (e) => {
+                        document.getElementById('loadPreloadedButton').disabled = !e.target.value;
+                    });
+                    
+                    console.log(`Loaded ${files.length} preloaded audio files`);
+                } else {
+                    console.warn('Could not load audio list');
+                }
+            } catch (error) {
+                console.warn('Audio list not available:', error);
+                // Hide preloaded section if not available
+                document.querySelector('.preloaded-audio').style.display = 'none';
+            }
+        }
+
+        // Load preloaded audio file
+        async function loadPreloadedAudio() {
+            const select = document.getElementById('preloadedSelect');
+            const filename = select.value;
+            if (!filename) return;
+            
+            // Initialize audio if needed
+            if (!audioContext) {
+                const success = await initializeAudio();
+                if (!success) return;
+            }
+            
+            try {
+                updateStatus('loading', `Loading ${filename}...`);
+                
+                const response = await fetch(`/audio/${filename}`);
+                if (!response.ok) throw new Error('Failed to load audio file');
+                
+                const arrayBuffer = await response.arrayBuffer();
+                currentBuffer = await audioContext.decodeAudioData(arrayBuffer);
+                
+                updateStatus('ready', `Loaded: ${filename}`);
+                document.getElementById('processButton').disabled = false;
+                
+                drawWaveform(currentBuffer);
+            } catch (error) {
+                console.error('Error loading preloaded audio:', error);
+                updateStatus('error', 'Error loading audio file');
+            }
         }
 
         // Initialize audio system on first user interaction
@@ -169,16 +243,18 @@
                 
                 // Update technical details
                 document.getElementById('sampleRate').textContent = audioContext.sampleRate;
-                document.getElementById('engineType').textContent = 'C/WebAssembly (Simplified)';
+                document.getElementById('engineType').textContent = 'WebAssembly Convolution Engine v2.0';
                 
-                // Initialize processor
-                processor = new ConvolutionProcessor();
-                await processor.initialize('./', audioContext.sampleRate);
+                // Initialize processor - GLOBAL
+                window.processor = new ConvolutionProcessor();
+                await window.processor.initialize('./', audioContext.sampleRate);
                 console.log('Processor initialized');
                 
-                // Check what version we're using
-                if (processor.getVersion) {
-                    console.log('Engine version:', processor.getVersion());
+                // Check version
+                if (window.processor.getVersion) {
+                    const version = window.processor.getVersion();
+                    console.log('Engine version:', version);
+                    document.getElementById('engineType').textContent = `WebAssembly Engine ${version}`;
                 }
                 
                 // Apply current parameter values
@@ -236,15 +312,16 @@
                 
                 // Process audio
                 scriptProcessor.onaudioprocess = (e) => {
-                    if (!isProcessingLive || !processor) return;
+                    if (!isProcessingLive || !window.processor) return;
                     
                     const input = e.inputBuffer.getChannelData(0);
                     const output = e.outputBuffer.getChannelData(0);
                     
                     try {
-                        const processed = processor.processAudio(input);
+                        const processed = window.processor.processAudio(input);
                         output.set(processed.subarray(0, output.length));
                     } catch (error) {
+                        console.error('Processing error:', error);
                         output.set(input); // Passthrough on error
                     }
                 };
@@ -358,13 +435,13 @@
 
         // Process audio file
         async function processAudioFile() {
-            if (!currentBuffer || !processor) return;
+            if (!currentBuffer || !window.processor) return;
             
             try {
                 updateStatus('loading', 'Processing audio...');
                 
                 const input = currentBuffer.getChannelData(0);
-                const output = processor.processAudio(input);
+                const output = window.processor.processAudio(input);
                 
                 const outputBuffer = audioContext.createBuffer(1, output.length, currentBuffer.sampleRate);
                 outputBuffer.getChannelData(0).set(output);
@@ -440,16 +517,10 @@
                         const val = parseFloat(e.target.value);
                         value.textContent = val;
                         
-                        // Log parameter changes for debugging
-                        console.log(`Setting ${param} to ${val}`);
-                        
-                        if (processor) {
-                            processor.setParameter(param, val);
-                            
-                            // If we're processing live, the changes should apply immediately
-                            if (isProcessingLive) {
-                                console.log(`Live update: ${param} = ${val}`);
-                            }
+                        // Update processor if it exists - USE GLOBAL
+                        if (window.processor && window.processor.initialized) {
+                            console.log(`UI: Setting ${param} to ${val}`);
+                            window.processor.setParameter(param, val);
                         }
                     });
                 }
@@ -458,9 +529,9 @@
             const irSelect = document.getElementById('impulseResponse');
             if (irSelect) {
                 irSelect.addEventListener('change', (e) => {
-                    console.log(`Setting IR type to ${e.target.value}`);
-                    if (processor) {
-                        processor.setImpulseResponseType(e.target.value);
+                    console.log(`UI: Setting IR type to ${e.target.value}`);
+                    if (window.processor && window.processor.initialized) {
+                        window.processor.setImpulseResponseType(e.target.value);
                     }
                 });
             }
@@ -468,15 +539,24 @@
 
         // Apply parameters to processor
         function applyParametersToProcessor() {
-            if (!processor) return;
+            if (!window.processor || !window.processor.initialized) return;
+            
+            console.log('Applying initial parameters to processor...');
             
             const params = ['roomSize', 'decayTime', 'preDelay', 'damping', 'lowFreq', 'diffusion', 'mix', 'earlyReflections'];
             params.forEach(param => {
                 const slider = document.getElementById(param);
                 if (slider) {
-                    processor.setParameter(param, parseFloat(slider.value));
+                    const value = parseFloat(slider.value);
+                    console.log(`Initial ${param}: ${value}`);
+                    window.processor.setParameter(param, value);
                 }
             });
+            
+            const irSelect = document.getElementById('impulseResponse');
+            if (irSelect) {
+                window.processor.setImpulseResponseType(irSelect.value);
+            }
         }
 
         // Reset parameters
@@ -498,11 +578,20 @@
                 if (slider && display) {
                     slider.value = value;
                     display.textContent = value;
-                    if (processor) {
-                        processor.setParameter(param, value);
+                    if (window.processor && window.processor.initialized) {
+                        window.processor.setParameter(param, value);
                     }
                 }
             });
+            
+            // Reset IR type
+            const irSelect = document.getElementById('impulseResponse');
+            if (irSelect) {
+                irSelect.value = 'hall';
+                if (window.processor && window.processor.initialized) {
+                    window.processor.setImpulseResponseType('hall');
+                }
+            }
         }
 
         // Update status
@@ -544,7 +633,7 @@
             ctx.stroke();
         }
 
-        // Start live visualization
+        // Visualization functions...
         function startLiveVisualization() {
             stopVisualization();
             
@@ -595,7 +684,6 @@
             draw();
         }
         
-        // Start playback visualization
         function startPlaybackVisualization() {
             stopVisualization();
             
@@ -648,20 +736,13 @@
             draw();
         }
         
-        // Stop visualization
         function stopVisualization() {
             if (animationId) {
                 cancelAnimationFrame(animationId);
                 animationId = null;
             }
         }
-        
-        // Update visualizer (remove old function)
-        function updateVisualizer(data) {
-            // This function is no longer needed as we use analyser
-        }
 
-        // Draw waveform
         function drawWaveform(buffer) {
             const canvas = document.getElementById('waveformCanvas');
             const ctx = canvas.getContext('2d');
@@ -701,7 +782,6 @@
             ctx.stroke();
         }
         
-        // Animated idle waveform
         function animateIdleWaveform() {
             stopVisualization();
             

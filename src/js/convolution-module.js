@@ -19,7 +19,7 @@ class ConvolutionProcessor {
         this.getSampleRateNative = null;
         this.getVersionNative = null;
         
-        // Parameter map
+        // Parameter map - make sure all parameters match C code
         this.parameterMap = {
             'roomSize': 0,
             'decayTime': 1,
@@ -28,9 +28,8 @@ class ConvolutionProcessor {
             'lowFreq': 4,
             'diffusion': 5,
             'mix': 6,
-            'earlyReflections': 7,
-            'highFreq': 8,
-            'lateMix': 9
+            'earlyReflections': 7
+            // Note: highFreq and lateMix are not in the HTML, so not included
         };
     }
     
@@ -132,10 +131,18 @@ class ConvolutionProcessor {
         
         const paramId = this.parameterMap[paramName];
         if (paramId !== undefined) {
-            console.log(`ConvolutionProcessor: Setting ${paramName} (${paramId}) to ${value}`);
-            this.setParameterNative(paramId, value);
+            console.log(`ConvolutionProcessor: Setting ${paramName} (id=${paramId}) to ${value}`);
+            
+            try {
+                // Call the WASM function
+                this.setParameterNative(paramId, parseFloat(value));
+                console.log(`ConvolutionProcessor: Successfully set ${paramName}`);
+            } catch (error) {
+                console.error(`ConvolutionProcessor: Error setting parameter:`, error);
+            }
         } else {
             console.warn(`ConvolutionProcessor: Unknown parameter: ${paramName}`);
+            console.log('Available parameters:', Object.keys(this.parameterMap));
         }
     }
     
@@ -146,24 +153,42 @@ class ConvolutionProcessor {
         }
         
         console.log(`ConvolutionProcessor: Setting IR type to ${irType}`);
-        this.setIRTypeNative(irType);
+        try {
+            this.setIRTypeNative(irType);
+        } catch (error) {
+            console.error('ConvolutionProcessor: Error setting IR type:', error);
+        }
     }
     
     getVersion() {
         if (!this.initialized) return 'Not initialized';
-        return this.getVersionNative();
+        try {
+            return this.getVersionNative();
+        } catch (error) {
+            console.error('ConvolutionProcessor: Error getting version:', error);
+            return 'Error';
+        }
     }
     
     getSampleRate() {
         if (!this.initialized) return 0;
-        return this.getSampleRateNative();
+        try {
+            return this.getSampleRateNative();
+        } catch (error) {
+            console.error('ConvolutionProcessor: Error getting sample rate:', error);
+            return 0;
+        }
     }
     
     cleanup() {
         if (this.initialized) {
             console.log('ConvolutionProcessor: Cleaning up...');
-            this.cleanupEngine();
-            this.initialized = false;
+            try {
+                this.cleanupEngine();
+                this.initialized = false;
+            } catch (error) {
+                console.error('ConvolutionProcessor: Error during cleanup:', error);
+            }
         }
     }
 }

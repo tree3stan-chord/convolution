@@ -162,6 +162,30 @@ copy_web_files() {
     cp "$SRC_DIR/js/audio-processor.js" "$BUILD_DIR/"
     [ -f "$SRC_DIR/js/convolution-worklet.js" ] && cp "$SRC_DIR/js/convolution-worklet.js" "$BUILD_DIR/"
     
+    # Setup audio directory
+    mkdir -p "$BUILD_DIR/audio"
+    if [ -f "$PROJECT_ROOT/audio/list.php" ]; then
+        cp "$PROJECT_ROOT/audio/list.php" "$BUILD_DIR/audio/"
+    else
+        # Create default list.php
+        cat > "$BUILD_DIR/audio/list.php" << 'EOF'
+<?php
+header('Content-Type: application/json');
+header('Access-Control-Allow-Origin: *');
+$files = glob('*.{wav,mp3,ogg,flac}', GLOB_BRACE);
+sort($files);
+echo json_encode($files);
+EOF
+    fi
+    
+    # Copy any existing audio files
+    if [ -d "$PROJECT_ROOT/audio" ]; then
+        find "$PROJECT_ROOT/audio" -name "*.wav" -o -name "*.mp3" -o -name "*.ogg" -o -name "*.flac" | \
+        while read -r file; do
+            [ -f "$file" ] && cp "$file" "$BUILD_DIR/audio/"
+        done
+    fi
+    
     # Create a simple favicon to avoid 404
     cat > "$BUILD_DIR/favicon.ico" << 'EOF'
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
@@ -178,6 +202,11 @@ AddType application/wasm .wasm
 # Enable CORS for WASM files (if needed)
 <FilesMatch "\.(wasm)$">
     Header set Access-Control-Allow-Origin "*"
+</FilesMatch>
+
+# PHP handling for .php files
+<FilesMatch "\.php$">
+    SetHandler application/x-httpd-php
 </FilesMatch>
 
 # Compression for better performance
