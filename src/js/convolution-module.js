@@ -12,6 +12,9 @@ class ConvolutionProcessor {
 
     async initialize(wasmPath, sampleRate = 48000) {
         try {
+            // Don't create AudioContext here - just load the module
+            this.sampleRate = sampleRate;
+            
             // Load the WebAssembly module
             this.module = await ConvolutionModule({
                 locateFile: (file) => {
@@ -22,8 +25,6 @@ class ConvolutionProcessor {
                     return file;
                 }
             });
-
-            this.sampleRate = sampleRate;
 
             // Initialize the engine
             this.module._init_engine(sampleRate);

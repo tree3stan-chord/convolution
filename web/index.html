@@ -4,243 +4,15 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Convolution Reverb Explorer</title>
-    <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
-
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-            background: linear-gradient(135deg, #0f0f1a 0%, #1a1a2e 100%);
-            color: #e0e0e0;
-            min-height: 100vh;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            padding: 20px;
-        }
-
-        .container {
-            max-width: 1200px;
-            width: 100%;
-            background: rgba(255, 255, 255, 0.05);
-            backdrop-filter: blur(10px);
-            border-radius: 20px;
-            padding: 30px;
-            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.3);
-            border: 1px solid rgba(255, 255, 255, 0.1);
-        }
-
-        h1 {
-            text-align: center;
-            margin-bottom: 30px;
-            font-size: 2.5em;
-            background: linear-gradient(45deg, #00b4d8, #90e0ef);
-            -webkit-background-clip: text;
-            -webkit-text-fill-color: transparent;
-            background-clip: text;
-        }
-
-        .status {
-            text-align: center;
-            padding: 15px;
-            margin-bottom: 20px;
-            border-radius: 10px;
-            background: rgba(255, 255, 255, 0.1);
-            font-weight: 500;
-        }
-
-        .status.loading {
-            color: #90e0ef;
-            border: 1px solid #90e0ef;
-        }
-
-        .status.ready {
-            color: #4ade80;
-            border: 1px solid #4ade80;
-        }
-
-        .status.error {
-            color: #f87171;
-            border: 1px solid #f87171;
-        }
-
-        .controls {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
-            gap: 20px;
-            margin-bottom: 30px;
-        }
-
-        .control-group {
-            background: rgba(255, 255, 255, 0.05);
-            padding: 20px;
-            border-radius: 15px;
-            border: 1px solid rgba(255, 255, 255, 0.1);
-            transition: all 0.3s ease;
-        }
-
-        .control-group:hover {
-            background: rgba(255, 255, 255, 0.08);
-            transform: translateY(-2px);
-            box-shadow: 0 10px 20px rgba(0, 0, 0, 0.2);
-        }
-
-        .control-group h3 {
-            margin-bottom: 15px;
-            color: #90e0ef;
-            font-size: 1.2em;
-        }
-
-        .control {
-            margin-bottom: 15px;
-        }
-
-        .control label {
-            display: block;
-            margin-bottom: 8px;
-            font-size: 0.9em;
-            color: #cae9ff;
-        }
-
-        .control input[type="range"] {
-            width: 100%;
-            height: 6px;
-            border-radius: 3px;
-            background: rgba(255, 255, 255, 0.1);
-            outline: none;
-            -webkit-appearance: none;
-        }
-
-        .control input[type="range"]::-webkit-slider-thumb {
-            -webkit-appearance: none;
-            width: 18px;
-            height: 18px;
-            border-radius: 50%;
-            background: linear-gradient(45deg, #00b4d8, #90e0ef);
-            cursor: pointer;
-            transition: all 0.2s ease;
-        }
-
-        .control input[type="range"]::-webkit-slider-thumb:hover {
-            transform: scale(1.2);
-            box-shadow: 0 0 10px rgba(144, 224, 239, 0.5);
-        }
-
-        .control select {
-            width: 100%;
-            padding: 10px;
-            border-radius: 8px;
-            background: rgba(255, 255, 255, 0.1);
-            border: 1px solid rgba(255, 255, 255, 0.2);
-            color: #e0e0e0;
-            font-size: 0.9em;
-            cursor: pointer;
-        }
-
-        .control .value {
-            display: inline-block;
-            margin-left: 10px;
-            font-size: 0.85em;
-            color: #90e0ef;
-            font-weight: 500;
-        }
-
-        .action-buttons {
-            display: flex;
-            gap: 15px;
-            justify-content: center;
-            margin-bottom: 30px;
-        }
-
-        .button {
-            padding: 12px 30px;
-            border: none;
-            border-radius: 10px;
-            font-size: 1em;
-            font-weight: 600;
-            cursor: pointer;
-            transition: all 0.3s ease;
-            text-transform: uppercase;
-            letter-spacing: 1px;
-        }
-
-        .button.primary {
-            background: linear-gradient(45deg, #00b4d8, #90e0ef);
-            color: #0f0f1a;
-        }
-
-        .button.primary:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 10px 20px rgba(0, 180, 216, 0.3);
-        }
-
-        .button.secondary {
-            background: rgba(255, 255, 255, 0.1);
-            color: #e0e0e0;
-            border: 1px solid rgba(255, 255, 255, 0.2);
-        }
-
-        .button.secondary:hover {
-            background: rgba(255, 255, 255, 0.15);
-        }
-
-        .button:disabled {
-            opacity: 0.5;
-            cursor: not-allowed;
-        }
-
-        .visualizer {
-            background: rgba(0, 0, 0, 0.3);
-            border-radius: 15px;
-            padding: 20px;
-            margin-top: 20px;
-            border: 1px solid rgba(255, 255, 255, 0.1);
-        }
-
-        .visualizer canvas {
-            width: 100%;
-            height: 200px;
-            border-radius: 10px;
-        }
-
-        .info {
-            margin-top: 30px;
-            padding: 20px;
-            background: rgba(255, 255, 255, 0.05);
-            border-radius: 15px;
-            border: 1px solid rgba(255, 255, 255, 0.1);
-        }
-
-        .info h3 {
-            color: #90e0ef;
-            margin-bottom: 10px;
-        }
-
-        .info p {
-            line-height: 1.6;
-            color: #cae9ff;
-        }
-
-        @keyframes pulse {
-            0% { opacity: 0.6; }
-            50% { opacity: 1; }
-            100% { opacity: 0.6; }
-        }
-
-        .loading-indicator {
-            animation: pulse 1.5s infinite;
-        }
-    </style>
+    <link rel="stylesheet" href="style.css">
+    <link rel="icon" type="image/x-icon" href="/favicon.ico">
 </head>
 <body>
     <div class="container">
         <h1>Convolution Reverb Explorer</h1>
         
-        <div id="status" class="status loading">
-            <span class="loading-indicator">Initializing WebAssembly module...</span>
+        <div id="status" class="status ready">
+            <span>Click "Start Live Input" to begin</span>
         </div>
 
         <div class="controls">
@@ -315,137 +87,319 @@
         <div class="info">
             <h3>About Convolution Reverb</h3>
             <p>
-                This web application demonstrates convolution-based reverb processing using a Fortran engine compiled to WebAssembly. 
-                The app starts with <strong>live microphone input</strong> by default - speak or play an instrument to hear the reverb in real-time!
+                This web application demonstrates convolution-based reverb processing using a WebAssembly engine. 
+                Click <strong>"Start Live Input"</strong> to process your microphone in real-time with reverb!
             </p>
             <p style="margin-top: 10px;">
-                You can also load and process audio files. Convolution reverb works by mathematically combining an input signal with an impulse response (IR) - 
-                a recording of how a real space responds to sound. Adjust the parameters above to explore different reverb characteristics.
-            </p>
-            <p style="margin-top: 10px;">
-                <strong>Note:</strong> For best results with live input, use headphones to avoid feedback. The implementation uses a simplified convolution 
-                algorithm optimized for WebAssembly performance.
+                You can also load and process audio files. Adjust the parameters above to explore different reverb characteristics.
+                For best results with live input, use headphones to avoid feedback.
             </p>
         </div>
     </div>
 
+    <!-- Load scripts that don't create AudioContext -->
+    <script src="convolution_reverb.js"></script>
+    <script src="convolution-module.js"></script>
+    
+    <!-- Main application script -->
     <script>
-        // Simulated WebAssembly module interface
-        let wasmModule = null;
+        // Global state
         let audioContext = null;
+        let processor = null;
+        let micStream = null;
+        let micSource = null;
+        let scriptProcessor = null;
+        let isProcessingLive = false;
         let currentBuffer = null;
+        let currentSource = null;
+        let isPlaying = false;
 
-        // Initialize audio context
-        function initAudioContext() {
-            audioContext = new (window.AudioContext || window.webkitAudioContext)();
-        }
+        // Wait for DOM to load
+        document.addEventListener('DOMContentLoaded', () => {
+            console.log('DOM loaded - setting up UI');
+            setupUI();
+        });
 
-        // Simulate WebAssembly module loading
-        async function loadWasmModule() {
-            return new Promise((resolve) => {
-                setTimeout(() => {
-                    wasmModule = {
-                        processConvolution: (inputBuffer, irBuffer, params) => {
-                            // This would call the actual Fortran convolution function
-                            console.log('Processing convolution with params:', params);
-                            return inputBuffer; // Placeholder
-                        },
-                        setParameter: (param, value) => {
-                            console.log(`Setting ${param} to ${value}`);
-                        }
-                    };
-                    resolve();
-                }, 1500);
+        // Setup UI without creating AudioContext
+        function setupUI() {
+            // Setup button handlers
+            document.getElementById('liveInputButton').addEventListener('click', toggleLiveInput);
+            document.getElementById('processButton').addEventListener('click', toggleProcessAudio);
+            document.getElementById('loadAudioButton').addEventListener('click', () => {
+                document.getElementById('audioFileInput').click();
             });
+            document.getElementById('resetButton').addEventListener('click', resetParameters);
+            
+            // Setup file input
+            document.getElementById('audioFileInput').addEventListener('change', handleFileSelect);
+            
+            // Setup parameter controls
+            setupParameterControls();
+            
+            // Setup visualizer
+            setupVisualizer();
         }
 
-        // Update parameter display values
-        const parameterElements = {
-            roomSize: document.getElementById('roomSize'),
-            decayTime: document.getElementById('decayTime'),
-            preDelay: document.getElementById('preDelay'),
-            damping: document.getElementById('damping'),
-            lowFreq: document.getElementById('lowFreq'),
-            diffusion: document.getElementById('diffusion'),
-            mix: document.getElementById('mix'),
-            earlyReflections: document.getElementById('earlyReflections')
-        };
-
-        const valueElements = {
-            roomSize: document.getElementById('roomSizeValue'),
-            decayTime: document.getElementById('decayTimeValue'),
-            preDelay: document.getElementById('preDelayValue'),
-            damping: document.getElementById('dampingValue'),
-            lowFreq: document.getElementById('lowFreqValue'),
-            diffusion: document.getElementById('diffusionValue'),
-            mix: document.getElementById('mixValue'),
-            earlyReflections: document.getElementById('earlyReflectionsValue')
-        };
-
-        // Add event listeners for parameter changes
-        Object.keys(parameterElements).forEach(param => {
-            parameterElements[param].addEventListener('input', (e) => {
-                const value = e.target.value;
-                valueElements[param].textContent = value;
+        // Initialize audio system on first user interaction
+        async function initializeAudio() {
+            if (audioContext) return;
+            
+            console.log('Initializing audio system...');
+            updateStatus('loading', 'Initializing audio system...');
+            
+            try {
+                // Create AudioContext
+                audioContext = new (window.AudioContext || window.webkitAudioContext)();
+                console.log('AudioContext created, state:', audioContext.state);
                 
-                if (wasmModule) {
-                    wasmModule.setParameter(param, parseFloat(value));
+                // Initialize processor
+                processor = new ConvolutionProcessor();
+                await processor.initialize('./', audioContext.sampleRate);
+                console.log('Processor initialized');
+                
+                // Apply current parameter values
+                applyParametersToProcessor();
+                
+                return true;
+            } catch (error) {
+                console.error('Failed to initialize audio:', error);
+                updateStatus('error', 'Failed to initialize audio: ' + error.message);
+                return false;
+            }
+        }
+
+        // Toggle live input
+        async function toggleLiveInput() {
+            if (isProcessingLive) {
+                stopLiveInput();
+            } else {
+                await startLiveInput();
+            }
+        }
+
+        // Start live input
+        async function startLiveInput() {
+            console.log('Starting live input...');
+            
+            // Initialize audio if needed
+            if (!audioContext) {
+                const success = await initializeAudio();
+                if (!success) return;
+            }
+            
+            // Resume context if needed
+            if (audioContext.state === 'suspended') {
+                await audioContext.resume();
+            }
+            
+            try {
+                updateStatus('loading', 'Requesting microphone access...');
+                
+                // Request microphone
+                micStream = await navigator.mediaDevices.getUserMedia({
+                    audio: {
+                        echoCancellation: false,
+                        noiseSuppression: false,
+                        autoGainControl: false
+                    }
+                });
+                
+                console.log('Microphone access granted');
+                
+                // Create audio nodes
+                micSource = audioContext.createMediaStreamSource(micStream);
+                scriptProcessor = audioContext.createScriptProcessor(2048, 1, 1);
+                
+                // Process audio
+                scriptProcessor.onaudioprocess = (e) => {
+                    if (!isProcessingLive || !processor) return;
+                    
+                    const input = e.inputBuffer.getChannelData(0);
+                    const output = e.outputBuffer.getChannelData(0);
+                    
+                    try {
+                        const processed = processor.processAudio(input);
+                        output.set(processed.subarray(0, output.length));
+                        updateVisualizer(output);
+                    } catch (error) {
+                        output.set(input); // Passthrough on error
+                    }
+                };
+                
+                // Connect nodes
+                micSource.connect(scriptProcessor);
+                scriptProcessor.connect(audioContext.destination);
+                
+                isProcessingLive = true;
+                updateStatus('ready', 'Processing live input with reverb');
+                document.getElementById('liveInputButton').textContent = 'Stop Live Input';
+                document.getElementById('liveInputButton').classList.add('active');
+                document.getElementById('processButton').disabled = true;
+                
+            } catch (error) {
+                console.error('Microphone error:', error);
+                if (error.name === 'NotAllowedError') {
+                    updateStatus('error', 'Microphone access denied. Please allow microphone access.');
+                } else if (error.name === 'NotFoundError') {
+                    updateStatus('error', 'No microphone found.');
+                } else {
+                    updateStatus('error', 'Error: ' + error.message);
+                }
+            }
+        }
+
+        // Stop live input
+        function stopLiveInput() {
+            isProcessingLive = false;
+            
+            if (scriptProcessor) {
+                scriptProcessor.disconnect();
+                scriptProcessor = null;
+            }
+            
+            if (micSource) {
+                micSource.disconnect();
+                micSource = null;
+            }
+            
+            if (micStream) {
+                micStream.getTracks().forEach(track => track.stop());
+                micStream = null;
+            }
+            
+            updateStatus('ready', 'Live input stopped');
+            document.getElementById('liveInputButton').textContent = 'Start Live Input';
+            document.getElementById('liveInputButton').classList.remove('active');
+            document.getElementById('processButton').disabled = currentBuffer == null;
+        }
+
+        // Handle file selection
+        async function handleFileSelect(e) {
+            const file = e.target.files[0];
+            if (!file) return;
+            
+            // Initialize audio if needed
+            if (!audioContext) {
+                const success = await initializeAudio();
+                if (!success) return;
+            }
+            
+            try {
+                updateStatus('loading', 'Loading audio file...');
+                const arrayBuffer = await file.arrayBuffer();
+                currentBuffer = await audioContext.decodeAudioData(arrayBuffer);
+                
+                updateStatus('ready', `Loaded: ${file.name}`);
+                document.getElementById('processButton').disabled = false;
+                
+                drawWaveform(currentBuffer);
+            } catch (error) {
+                console.error('File load error:', error);
+                updateStatus('error', 'Error loading file');
+            }
+        }
+
+        // Toggle process audio
+        function toggleProcessAudio() {
+            if (isPlaying) {
+                stopAudio();
+            } else {
+                processAudioFile();
+            }
+        }
+
+        // Process audio file
+        async function processAudioFile() {
+            if (!currentBuffer || !processor) return;
+            
+            try {
+                updateStatus('loading', 'Processing audio...');
+                
+                const input = currentBuffer.getChannelData(0);
+                const output = processor.processAudio(input);
+                
+                const outputBuffer = audioContext.createBuffer(1, output.length, currentBuffer.sampleRate);
+                outputBuffer.getChannelData(0).set(output);
+                
+                playBuffer(outputBuffer);
+                updateStatus('ready', 'Playing processed audio');
+            } catch (error) {
+                console.error('Processing error:', error);
+                updateStatus('error', 'Error processing audio');
+            }
+        }
+
+        // Play buffer
+        function playBuffer(buffer) {
+            stopAudio();
+            
+            currentSource = audioContext.createBufferSource();
+            currentSource.buffer = buffer;
+            currentSource.connect(audioContext.destination);
+            currentSource.onended = () => {
+                isPlaying = false;
+                document.getElementById('processButton').textContent = 'Process Audio';
+            };
+            
+            currentSource.start(0);
+            isPlaying = true;
+            document.getElementById('processButton').textContent = 'Stop';
+        }
+
+        // Stop audio
+        function stopAudio() {
+            if (currentSource) {
+                currentSource.stop();
+                currentSource.disconnect();
+                currentSource = null;
+            }
+            isPlaying = false;
+            document.getElementById('processButton').textContent = 'Process Audio';
+        }
+
+        // Setup parameter controls
+        function setupParameterControls() {
+            const params = ['roomSize', 'decayTime', 'preDelay', 'damping', 'lowFreq', 'diffusion', 'mix', 'earlyReflections'];
+            
+            params.forEach(param => {
+                const slider = document.getElementById(param);
+                const value = document.getElementById(param + 'Value');
+                
+                if (slider && value) {
+                    slider.addEventListener('input', (e) => {
+                        value.textContent = e.target.value;
+                        if (processor) {
+                            processor.setParameter(param, parseFloat(e.target.value));
+                        }
+                    });
                 }
             });
-        });
+            
+            const irSelect = document.getElementById('impulseResponse');
+            if (irSelect) {
+                irSelect.addEventListener('change', (e) => {
+                    if (processor) {
+                        processor.setImpulseResponseType(e.target.value);
+                    }
+                });
+            }
+        }
 
-        // File input handling
-        document.getElementById('loadAudioButton').addEventListener('click', () => {
-            document.getElementById('audioFileInput').click();
-        });
-
-        document.getElementById('audioFileInput').addEventListener('change', async (e) => {
-            const file = e.target.files[0];
-            if (file) {
-                try {
-                    const arrayBuffer = await file.arrayBuffer();
-                    currentBuffer = await audioContext.decodeAudioData(arrayBuffer);
-                    document.getElementById('processButton').disabled = false;
-                    drawWaveform(currentBuffer);
-                } catch (error) {
-                    console.error('Error loading audio file:', error);
-                    alert('Error loading audio file. Please try a different file.');
+        // Apply parameters to processor
+        function applyParametersToProcessor() {
+            if (!processor) return;
+            
+            const params = ['roomSize', 'decayTime', 'preDelay', 'damping', 'lowFreq', 'diffusion', 'mix', 'earlyReflections'];
+            params.forEach(param => {
+                const slider = document.getElementById(param);
+                if (slider) {
+                    processor.setParameter(param, parseFloat(slider.value));
                 }
-            }
-        });
+            });
+        }
 
-        // Process button
-        document.getElementById('processButton').addEventListener('click', () => {
-            if (currentBuffer && wasmModule) {
-                const params = {
-                    roomSize: parseFloat(parameterElements.roomSize.value),
-                    decayTime: parseFloat(parameterElements.decayTime.value),
-                    preDelay: parseFloat(parameterElements.preDelay.value),
-                    damping: parseFloat(parameterElements.damping.value),
-                    lowFreq: parseFloat(parameterElements.lowFreq.value),
-                    diffusion: parseFloat(parameterElements.diffusion.value),
-                    mix: parseFloat(parameterElements.mix.value),
-                    earlyReflections: parseFloat(parameterElements.earlyReflections.value),
-                    impulseResponse: document.getElementById('impulseResponse').value
-                };
-
-                // Process audio through WebAssembly module
-                const processedBuffer = wasmModule.processConvolution(
-                    currentBuffer.getChannelData(0),
-                    null, // IR buffer would be loaded based on selection
-                    params
-                );
-
-                // Play processed audio
-                const source = audioContext.createBufferSource();
-                source.buffer = currentBuffer; // Would use processedBuffer in real implementation
-                source.connect(audioContext.destination);
-                source.start();
-            }
-        });
-
-        // Reset button
-        document.getElementById('resetButton').addEventListener('click', () => {
+        // Reset parameters
+        function resetParameters() {
             const defaults = {
                 roomSize: 50,
                 decayTime: 2.5,
@@ -456,79 +410,114 @@
                 mix: 30,
                 earlyReflections: 50
             };
-
-            Object.keys(defaults).forEach(param => {
-                parameterElements[param].value = defaults[param];
-                valueElements[param].textContent = defaults[param];
-                if (wasmModule) {
-                    wasmModule.setParameter(param, defaults[param]);
+            
+            Object.entries(defaults).forEach(([param, value]) => {
+                const slider = document.getElementById(param);
+                const display = document.getElementById(param + 'Value');
+                if (slider && display) {
+                    slider.value = value;
+                    display.textContent = value;
+                    if (processor) {
+                        processor.setParameter(param, value);
+                    }
                 }
             });
-        });
+        }
 
-        // Waveform visualization
-        function drawWaveform(audioBuffer) {
+        // Update status
+        function updateStatus(type, message) {
+            const status = document.getElementById('status');
+            status.className = 'status ' + type;
+            status.textContent = message;
+        }
+
+        // Setup visualizer
+        function setupVisualizer() {
             const canvas = document.getElementById('waveformCanvas');
             const ctx = canvas.getContext('2d');
-            const data = audioBuffer.getChannelData(0);
             
-            canvas.width = canvas.offsetWidth;
-            canvas.height = canvas.offsetHeight;
+            function resize() {
+                canvas.width = canvas.offsetWidth;
+                canvas.height = canvas.offsetHeight;
+                drawEmptyWaveform();
+            }
+            
+            window.addEventListener('resize', resize);
+            resize();
+        }
+
+        // Draw empty waveform
+        function drawEmptyWaveform() {
+            const canvas = document.getElementById('waveformCanvas');
+            const ctx = canvas.getContext('2d');
             
             ctx.clearRect(0, 0, canvas.width, canvas.height);
             ctx.strokeStyle = '#90e0ef';
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+            ctx.moveTo(0, canvas.height / 2);
+            ctx.lineTo(canvas.width, canvas.height / 2);
+            ctx.stroke();
+        }
+
+        // Update visualizer
+        function updateVisualizer(data) {
+            const canvas = document.getElementById('waveformCanvas');
+            const ctx = canvas.getContext('2d');
+            
+            ctx.fillStyle = 'rgba(0, 0, 0, 0.1)';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            
+            ctx.strokeStyle = '#90e0ef';
             ctx.lineWidth = 2;
+            ctx.beginPath();
             
             const sliceWidth = canvas.width / data.length;
             let x = 0;
             
-            ctx.beginPath();
-            for (let i = 0; i < data.length; i += Math.ceil(data.length / 1000)) {
+            for (let i = 0; i < data.length; i++) {
                 const y = (1 + data[i]) * canvas.height / 2;
-                
                 if (i === 0) {
                     ctx.moveTo(x, y);
                 } else {
                     ctx.lineTo(x, y);
                 }
-                
-                x += sliceWidth * Math.ceil(data.length / 1000);
+                x += sliceWidth;
             }
+            
             ctx.stroke();
         }
 
-        // Initialize application
-        async function init() {
-            try {
-                initAudioContext();
-                await loadWasmModule();
+        // Draw waveform
+        function drawWaveform(buffer) {
+            const canvas = document.getElementById('waveformCanvas');
+            const ctx = canvas.getContext('2d');
+            const data = buffer.getChannelData(0);
+            
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            ctx.strokeStyle = '#90e0ef';
+            ctx.lineWidth = 2;
+            
+            const step = Math.ceil(data.length / canvas.width);
+            ctx.beginPath();
+            
+            for (let i = 0; i < canvas.width; i++) {
+                const min = Math.min(...data.slice(i * step, (i + 1) * step));
+                const max = Math.max(...data.slice(i * step, (i + 1) * step));
                 
-                const statusElement = document.getElementById('status');
-                statusElement.className = 'status ready';
-                statusElement.innerHTML = 'WebAssembly module loaded successfully!';
+                const yMin = (1 - min) * canvas.height / 2;
+                const yMax = (1 - max) * canvas.height / 2;
                 
-                // Draw empty waveform
-                const canvas = document.getElementById('waveformCanvas');
-                const ctx = canvas.getContext('2d');
-                canvas.width = canvas.offsetWidth;
-                canvas.height = canvas.offsetHeight;
-                ctx.strokeStyle = '#90e0ef';
-                ctx.lineWidth = 1;
-                ctx.beginPath();
-                ctx.moveTo(0, canvas.height / 2);
-                ctx.lineTo(canvas.width, canvas.height / 2);
-                ctx.stroke();
-                
-            } catch (error) {
-                const statusElement = document.getElementById('status');
-                statusElement.className = 'status error';
-                statusElement.innerHTML = 'Error loading WebAssembly module';
-                console.error('Initialization error:', error);
+                if (i === 0) {
+                    ctx.moveTo(i, (yMin + yMax) / 2);
+                } else {
+                    ctx.lineTo(i, yMin);
+                    ctx.lineTo(i, yMax);
+                }
             }
+            
+            ctx.stroke();
         }
-
-        // Start initialization when page loads
-        window.addEventListener('load', init);
     </script>
 </body>
 </html>
