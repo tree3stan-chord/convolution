@@ -10,10 +10,13 @@
 // Fortran function declarations with underscore suffix (common naming convention)
 extern void init_convolution_engine_(int* sample_rate);
 extern void process_convolution_(double* input, double* output, int* num_samples);
-extern void set_parameter_(char* param_name, double* value, int param_name_len);
-extern void set_ir_type_(char* ir_type, int ir_type_len);
+extern void set_parameter_(char* param_name, double* value, int* param_name_len);
+extern void set_ir_type_(char* ir_type, int* ir_type_len);
 extern void cleanup_convolution_engine_();
 extern void set_param_float_(int* param_id, float* value);
+extern int is_initialized_();
+extern int get_sample_rate_();
+extern char* get_version_();
 
 // Global state
 static int g_sample_rate = 48000;
@@ -63,16 +66,10 @@ void set_parameter_by_name(const char* param_name, float value) {
         return;
     }
     
-    // Fortran expects fixed-length strings, so we need to pad with spaces
-    char padded_name[32];
-    memset(padded_name, ' ', 32);
-    
+    // Fortran expects the string and its length
     int len = strlen(param_name);
-    if (len > 32) len = 32;
-    memcpy(padded_name, param_name, len);
-    
     double dvalue = (double)value;
-    set_parameter_(padded_name, &dvalue, 32);
+    set_parameter_((char*)param_name, &dvalue, &len);
 }
 
 // WebAssembly exported function: Set impulse response type
@@ -85,15 +82,9 @@ void set_ir_type(const char* ir_type) {
     
     printf("Setting IR type to: %s\n", ir_type);
     
-    // Fortran expects fixed-length strings
-    char padded_type[20];
-    memset(padded_type, ' ', 20);
-    
+    // Pass string and length to Fortran
     int len = strlen(ir_type);
-    if (len > 20) len = 20;
-    memcpy(padded_type, ir_type, len);
-    
-    set_ir_type_(padded_type, 20);
+    set_ir_type_((char*)ir_type, &len);
 }
 
 // WebAssembly exported function: Cleanup engine

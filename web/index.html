@@ -94,6 +94,19 @@
                 You can also load and process audio files. Adjust the parameters above to explore different reverb characteristics.
                 For best results with live input, use headphones to avoid feedback.
             </p>
+            <details style="margin-top: 15px;">
+                <summary style="cursor: pointer; color: #90e0ef;">Technical Details</summary>
+                <div style="margin-top: 10px; padding: 10px; background: rgba(255,255,255,0.05); border-radius: 8px;">
+                    <p><strong>Engine:</strong> <span id="engineType">Checking...</span></p>
+                    <p><strong>Sample Rate:</strong> <span id="sampleRate">-</span> Hz</p>
+                    <p><strong>Processing:</strong> <span id="processingType">-</span></p>
+                    <p><strong>Latency:</strong> <span id="latency">-</span> ms</p>
+                    <p style="margin-top: 8px; font-size: 0.9em; opacity: 0.8;">
+                        Note: The current implementation uses a simplified C convolution algorithm compiled to WebAssembly. 
+                        The original Fortran code requires specialized toolchain support for WASM compilation.
+                    </p>
+                </div>
+            </details>
         </div>
     </div>
 
@@ -154,10 +167,19 @@
                 audioContext = new (window.AudioContext || window.webkitAudioContext)();
                 console.log('AudioContext created, state:', audioContext.state);
                 
+                // Update technical details
+                document.getElementById('sampleRate').textContent = audioContext.sampleRate;
+                document.getElementById('engineType').textContent = 'C/WebAssembly (Simplified)';
+                
                 // Initialize processor
                 processor = new ConvolutionProcessor();
                 await processor.initialize('./', audioContext.sampleRate);
                 console.log('Processor initialized');
+                
+                // Check what version we're using
+                if (processor.getVersion) {
+                    console.log('Engine version:', processor.getVersion());
+                }
                 
                 // Apply current parameter values
                 applyParametersToProcessor();
@@ -236,6 +258,12 @@
                 micSource.connect(scriptProcessor);
                 scriptProcessor.connect(audioContext.destination);
                 scriptProcessor.connect(analyser);
+                
+                // Update technical details
+                const bufferSize = scriptProcessor.bufferSize;
+                const latencyMs = (bufferSize / audioContext.sampleRate) * 1000;
+                document.getElementById('processingType').textContent = 'ScriptProcessor (2048 samples)';
+                document.getElementById('latency').textContent = latencyMs.toFixed(1);
                 
                 // Start visualization
                 startLiveVisualization();
@@ -409,9 +437,19 @@
                 
                 if (slider && value) {
                     slider.addEventListener('input', (e) => {
-                        value.textContent = e.target.value;
+                        const val = parseFloat(e.target.value);
+                        value.textContent = val;
+                        
+                        // Log parameter changes for debugging
+                        console.log(`Setting ${param} to ${val}`);
+                        
                         if (processor) {
-                            processor.setParameter(param, parseFloat(e.target.value));
+                            processor.setParameter(param, val);
+                            
+                            // If we're processing live, the changes should apply immediately
+                            if (isProcessingLive) {
+                                console.log(`Live update: ${param} = ${val}`);
+                            }
                         }
                     });
                 }
@@ -420,6 +458,7 @@
             const irSelect = document.getElementById('impulseResponse');
             if (irSelect) {
                 irSelect.addEventListener('change', (e) => {
+                    console.log(`Setting IR type to ${e.target.value}`);
                     if (processor) {
                         processor.setImpulseResponseType(e.target.value);
                     }
