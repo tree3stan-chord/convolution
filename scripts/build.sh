@@ -280,8 +280,13 @@ copy_web_files() {
     cp "$SRC_DIR/js/convolution-module.js" "$BUILD_DIR/"
     cp "$SRC_DIR/js/audio-processor.js" "$BUILD_DIR/"
     
-    # Create test file
-    cat > "$BUILD_DIR/test.html" << 'EOF'
+    # Copy worklet file if it exists
+    if [ -f "$SRC_DIR/js/convolution-worklet.js" ]; then
+        cp "$SRC_DIR/js/convolution-worklet.js" "$BUILD_DIR/"
+    fi
+    
+    # Create worklet file
+    cat > "$BUILD_DIR/convolution-worklet.js" << 'EOF'
 <!DOCTYPE html>
 <html>
 <head>
