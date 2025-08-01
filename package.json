@@ -1,0 +1,81 @@
+{
+  "name": "convolution-reverb-wasm",
+  "version": "1.0.0",
+  "description": "High-performance convolution reverb engine written in Fortran and compiled to WebAssembly",
+  "main": "build/convolution-module.js",
+  "directories": {
+    "test": "test",
+    "build": "build"
+  },
+  "scripts": {
+    "setup": "./scripts/setup-emscripten.sh",
+    "build": "./scripts/build.sh",
+    "build:cmake": "mkdir -p build && cd build && emcmake cmake .. && emmake make",
+    "build:make": "emmake make",
+    "clean": "rm -rf build",
+    "serve": "cd build && python3 -m http.server 8000",
+    "dev": "npm run build && npm run serve",
+    "deploy": "./scripts/deploy.sh",
+    "deploy:github": "DEPLOY_TARGET=github ./scripts/deploy.sh",
+    "deploy:netlify": "DEPLOY_TARGET=netlify ./scripts/deploy.sh",
+    "deploy:vercel": "DEPLOY_TARGET=vercel ./scripts/deploy.sh",
+    "test": "cd build && python3 -m http.server 8000 & sleep 2 && open http://localhost:8000/test.html",
+    "lint": "eslint src/js/*.js web/*.js",
+    "format": "prettier --write 'src/js/*.js' 'web/*.js' '*.json'"
+  },
+  "repository": {
+    "type": "git",
+    "url": ""
+  },
+  "keywords": [
+    "webassembly",
+    "wasm",
+    "fortran",
+    "audio",
+    "dsp",
+    "reverb",
+    "convolution",
+    "web-audio",
+    "signal-processing"
+  ],
+  "author": "matthew forrester wolffe espadonne@outlook.com",
+  "license": "GPL-3.0-only",
+  "bugs": {
+    "url": ""
+  },
+  "homepage": "",
+  "devDependencies": {
+    "eslint": "^8.50.0",
+    "prettier": "^3.0.3",
+    "http-server": "^14.1.1",
+    "netlify-cli": "^16.4.0",
+    "vercel": "^32.3.0"
+  },
+  "dependencies": {},
+  "engines": {
+    "node": ">=14.0.0"
+  },
+  "files": [
+    "build/convolution_reverb.js",
+    "build/convolution_reverb.wasm",
+    "build/convolution-module.js",
+    "build/audio-processor.js",
+    "src/",
+    "web/",
+    "scripts/",
+    "README.md",
+    "LICENSE"
+  ],
+  "browser": {
+    "fs": false,
+    "path": false,
+    "crypto": false
+  },
+  "config": {
+    "port": 8000,
+    "host": "localhost"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}
