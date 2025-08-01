@@ -1,147 +1,26 @@
-// convolution-module.js - JavaScript Wrapper for Convolution WebAssembly Module
+// convolution-module.js
+// WebAssembly module wrapper for the convolution reverb engine
 
 class ConvolutionProcessor {
     constructor() {
         this.module = null;
         this.initialized = false;
-        this.inputPtr = null;
-        this.outputPtr = null;
-        this.maxSamples = 0;
         this.sampleRate = 48000;
-    }
-
-    async initialize(wasmPath, sampleRate = 48000) {
-        try {
-            // Don't create AudioContext here - just load the module
-            this.sampleRate = sampleRate;
-            
-            // Load the WebAssembly module
-            this.module = await ConvolutionModule({
-                locateFile: (file) => {
-                    // Handle both .wasm and .js files
-                    if (file.endsWith('.wasm') || file.endsWith('.js')) {
-                        return wasmPath + file;
-                    }
-                    return file;
-                }
-            });
-
-            // Initialize the engine
-            this.module._init_engine(sampleRate);
-            
-            // Check if initialized
-            if (this.module._is_initialized()) {
-                this.initialized = true;
-                console.log('ConvolutionProcessor initialized successfully');
-                console.log('Version:', this.module.UTF8ToString(this.module._get_version()));
-                console.log('Sample rate:', this.module._get_sample_rate());
-            } else {
-                throw new Error('Failed to initialize convolution engine');
-            }
-        } catch (error) {
-            console.error('Error initializing ConvolutionProcessor:', error);
-            throw error;
-        }
-    }
-
-    allocateBuffers(numSamples) {
-        if (numSamples > this.maxSamples) {
-            // Free existing buffers
-            if (this.inputPtr) {
-                this.module._free_double_array(this.inputPtr);
-                this.module._free_double_array(this.outputPtr);
-            }
-
-            // Allocate new buffers
-            this.inputPtr = this.module._allocate_double_array(numSamples);
-            this.outputPtr = this.module._allocate_double_array(numSamples);
-            this.maxSamples = numSamples;
-
-            if (!this.inputPtr || !this.outputPtr) {
-                throw new Error('Failed to allocate memory buffers');
-            }
-        }
-    }
-
-    processAudio(inputArray) {
-        if (!this.initialized) {
-            throw new Error('ConvolutionProcessor not initialized');
-        }
-
-        const numSamples = inputArray.length;
-        this.allocateBuffers(numSamples);
-
-        // Convert to Float64Array if needed
-        let inputFloat64;
-        if (inputArray instanceof Float64Array) {
-            inputFloat64 = inputArray;
-        } else if (inputArray instanceof Float32Array) {
-            inputFloat64 = new Float64Array(inputArray);
-        } else {
-            inputFloat64 = new Float64Array(inputArray);
-        }
-
-        // Copy input data to WebAssembly memory
-        this.module.HEAPF64.set(inputFloat64, this.inputPtr / 8);
-
-        // Process audio
-        this.module._process_audio(this.inputPtr, this.outputPtr, numSamples);
-
-        // Copy output data from WebAssembly memory
-        const outputArray = new Float64Array(
-            this.module.HEAPF64.buffer,
-            this.outputPtr,
-            numSamples
-        );
-
-        // Return a copy to avoid memory issues
-        return new Float64Array(outputArray);
-    }
-
-    processAudioWithMix(inputArray, mixLevel) {
-        if (!this.initialized) {
-            throw new Error('ConvolutionProcessor not initialized');
-        }
-
-        const numSamples = inputArray.length;
-        this.allocateBuffers(numSamples);
-
-        // Convert to Float64Array if needed
-        let inputFloat64;
-        if (inputArray instanceof Float64Array) {
-            inputFloat64 = inputArray;
-        } else {
-            inputFloat64 = new Float64Array(inputArray);
-        }
-
-        // Copy input data to WebAssembly memory
-        this.module.HEAPF64.set(inputFloat64, this.inputPtr / 8);
-
-        // Process audio with mix
-        this.module._process_audio_with_mix(
-            this.inputPtr, 
-            this.outputPtr, 
-            numSamples, 
-            mixLevel / 100.0
-        );
-
-        // Copy output data from WebAssembly memory
-        const outputArray = new Float64Array(
-            this.module.HEAPF64.buffer,
-            this.outputPtr,
-            numSamples
-        );
-
-        return new Float64Array(outputArray);
-    }
-
-    setParameter(paramName, value) {
-        if (!this.initialized) {
-            console.warn('ConvolutionProcessor not initialized');
-            return;
-        }
-
-        const paramMap = {
+        
+        // Function wrappers
+        this.initEngine = null;
+        this.processAudioNative = null;
+        this.setParameterNative = null;
+        this.setIRTypeNative = null;
+        this.cleanupEngine = null;
+        this.allocateDoubleArray = null;
+        this.freeDoubleArray = null;
+        this.isInitialized = null;
+        this.getSampleRateNative = null;
+        this.getVersionNative = null;
+        
+        // Parameter map
+        this.parameterMap = {
             'roomSize': 0,
             'decayTime': 1,
             'preDelay': 2,
@@ -149,104 +28,147 @@ class ConvolutionProcessor {
             'lowFreq': 4,
             'diffusion': 5,
             'mix': 6,
-            'earlyReflections': 7
+            'earlyReflections': 7,
+            'highFreq': 8,
+            'lateMix': 9
         };
-
-        const paramId = paramMap[paramName];
-        if (paramId !== undefined) {
-            this.module._set_parameter(paramId, value);
-            console.log(`Set ${paramName} to ${value}`);
-        } else {
-            console.warn(`Unknown parameter: ${paramName}`);
-        }
     }
-
-    setImpulseResponseType(irType) {
-        if (!this.initialized) {
-            console.warn('ConvolutionProcessor not initialized');
-            return;
-        }
-
-        // Use stringToUTF8 instead of allocateUTF8
-        const bufferSize = this.module.lengthBytesUTF8(irType) + 1;
-        const irTypePtr = this.module._malloc(bufferSize);
+    
+    async initialize(wasmPath, sampleRate) {
+        console.log('ConvolutionProcessor: Loading WebAssembly module...');
         
         try {
-            this.module.stringToUTF8(irType, irTypePtr, bufferSize);
-            this.module._set_ir_type(irTypePtr);
-            console.log(`Set impulse response type to: ${irType}`);
-        } finally {
-            // Always free the allocated string
-            this.module._free(irTypePtr);
+            // Load the WebAssembly module
+            this.module = await ConvolutionModule({
+                locateFile: (filename) => {
+                    return wasmPath + filename;
+                },
+                print: (text) => console.log('WASM:', text),
+                printErr: (text) => console.error('WASM Error:', text),
+                onRuntimeInitialized: () => {
+                    console.log('ConvolutionProcessor: WebAssembly runtime initialized');
+                }
+            });
+            
+            console.log('ConvolutionProcessor: Module loaded, setting up functions...');
+            
+            // Get function wrappers
+            this.initEngine = this.module.cwrap('init_engine', null, ['number']);
+            this.processAudioNative = this.module.cwrap('process_audio', null, ['number', 'number', 'number']);
+            this.setParameterNative = this.module.cwrap('set_parameter', null, ['number', 'number']);
+            this.setIRTypeNative = this.module.cwrap('set_ir_type', null, ['string']);
+            this.cleanupEngine = this.module.cwrap('cleanup_engine', null, []);
+            this.allocateDoubleArray = this.module.cwrap('allocate_double_array', 'number', ['number']);
+            this.freeDoubleArray = this.module.cwrap('free_double_array', null, ['number']);
+            this.isInitialized = this.module.cwrap('is_initialized', 'number', []);
+            this.getSampleRateNative = this.module.cwrap('get_sample_rate', 'number', []);
+            this.getVersionNative = this.module.cwrap('get_version', 'string', []);
+            
+            // Initialize the engine
+            this.sampleRate = sampleRate;
+            this.initEngine(sampleRate);
+            
+            this.initialized = true;
+            
+            console.log('ConvolutionProcessor: Initialization complete!');
+            console.log('ConvolutionProcessor: Version:', this.getVersion());
+            console.log('ConvolutionProcessor: Sample rate:', this.getSampleRate(), 'Hz');
+            console.log('ConvolutionProcessor: Ready for live input');
+            
+            return true;
+        } catch (error) {
+            console.error('ConvolutionProcessor: Initialization failed:', error);
+            throw error;
         }
     }
-
+    
+    processAudio(inputArray) {
+        if (!this.initialized) {
+            console.warn('ConvolutionProcessor: Not initialized, returning input');
+            return inputArray;
+        }
+        
+        const numSamples = inputArray.length;
+        
+        // Allocate memory for input and output
+        const inputPtr = this.allocateDoubleArray(numSamples);
+        const outputPtr = this.allocateDoubleArray(numSamples);
+        
+        try {
+            // Copy input data to WASM memory - handle both Float32 and Float64
+            if (inputArray instanceof Float32Array) {
+                const float64Input = new Float64Array(inputArray);
+                this.module.HEAPF64.set(float64Input, inputPtr / 8);
+            } else {
+                this.module.HEAPF64.set(inputArray, inputPtr / 8);
+            }
+            
+            // Process audio
+            this.processAudioNative(inputPtr, outputPtr, numSamples);
+            
+            // Copy output data from WASM memory
+            const outputArray = new Float64Array(numSamples);
+            outputArray.set(this.module.HEAPF64.subarray(outputPtr / 8, outputPtr / 8 + numSamples));
+            
+            // Convert to Float32Array for Web Audio API
+            const float32Output = new Float32Array(numSamples);
+            for (let i = 0; i < numSamples; i++) {
+                float32Output[i] = outputArray[i];
+            }
+            
+            return float32Output;
+        } finally {
+            // Clean up allocated memory
+            this.freeDoubleArray(inputPtr);
+            this.freeDoubleArray(outputPtr);
+        }
+    }
+    
+    setParameter(paramName, value) {
+        if (!this.initialized) {
+            console.warn('ConvolutionProcessor: Cannot set parameter - not initialized');
+            return;
+        }
+        
+        const paramId = this.parameterMap[paramName];
+        if (paramId !== undefined) {
+            console.log(`ConvolutionProcessor: Setting ${paramName} (${paramId}) to ${value}`);
+            this.setParameterNative(paramId, value);
+        } else {
+            console.warn(`ConvolutionProcessor: Unknown parameter: ${paramName}`);
+        }
+    }
+    
+    setImpulseResponseType(irType) {
+        if (!this.initialized) {
+            console.warn('ConvolutionProcessor: Cannot set IR type - not initialized');
+            return;
+        }
+        
+        console.log(`ConvolutionProcessor: Setting IR type to ${irType}`);
+        this.setIRTypeNative(irType);
+    }
+    
     getVersion() {
         if (!this.initialized) return 'Not initialized';
-        
-        const versionPtr = this.module._get_version();
-        return this.module.UTF8ToString(versionPtr);
+        return this.getVersionNative();
     }
-
+    
     getSampleRate() {
         if (!this.initialized) return 0;
-        
-        return this.module._get_sample_rate();
+        return this.getSampleRateNative();
     }
-
-    isInitialized() {
-        return this.initialized && this.module && this.module._is_initialized();
-    }
-
+    
     cleanup() {
         if (this.initialized) {
-            // Free allocated buffers
-            if (this.inputPtr) {
-                this.module._free_double_array(this.inputPtr);
-                this.module._free_double_array(this.outputPtr);
-                this.inputPtr = null;
-                this.outputPtr = null;
-            }
-
-            // Cleanup engine
-            this.module._cleanup_engine();
+            console.log('ConvolutionProcessor: Cleaning up...');
+            this.cleanupEngine();
             this.initialized = false;
-            this.maxSamples = 0;
-            
-            console.log('ConvolutionProcessor cleaned up');
         }
     }
 }
 
-// For AudioWorklet support
-class ConvolutionWorkletNode extends AudioWorkletNode {
-    constructor(context, processorOptions) {
-        super(context, 'convolution-processor', processorOptions);
-    }
-
-    setParameter(paramName, value) {
-        this.port.postMessage({
-            type: 'setParameter',
-            paramName: paramName,
-            value: value
-        });
-    }
-
-    setImpulseResponseType(irType) {
-        this.port.postMessage({
-            type: 'setIRType',
-            irType: irType
-        });
-    }
-}
-
-// Export for use in web applications and Node.js
+// Export for use
 if (typeof module !== 'undefined' && module.exports) {
-    module.exports = { ConvolutionProcessor, ConvolutionWorkletNode };
-}
-
-// For ES6 modules
-if (typeof window !== 'undefined') {
-    window.ConvolutionProcessor = ConvolutionProcessor;
-    window.ConvolutionWorkletNode = ConvolutionWorkletNode;
+    module.exports = ConvolutionProcessor;
 }

@@ -1,28 +1,22 @@
-# Makefile for Convolution Reverb WebAssembly
+# Makefile for Convolution Reverb WebAssembly (C-only version)
 
-# Compilers
-FC = gfortran
+# Compiler
 CC = emcc
-AR = ar
 
 # Directories
 SRC_DIR = src
 BUILD_DIR = build
-OBJ_DIR = $(BUILD_DIR)/obj
-FORTRAN_DIR = $(SRC_DIR)/fortran
 C_DIR = $(SRC_DIR)/c
 JS_DIR = $(SRC_DIR)/js
 WEB_DIR = web
 
 # Compiler flags
-FFLAGS = -O3 -ffast-math -fPIC -c -J$(OBJ_DIR)
-CFLAGS = -O3 -ffast-math -I$(C_DIR)
-ARFLAGS = rcs
+CFLAGS = -O3 -I$(C_DIR)
 
 # Emscripten flags
 EMFLAGS = -s WASM=1 \
           -s EXPORTED_FUNCTIONS='["_init_engine","_process_audio","_set_parameter","_set_ir_type","_cleanup_engine","_allocate_double_array","_free_double_array","_is_initialized","_get_sample_rate","_get_version","_process_audio_with_mix"]' \
-          -s EXPORTED_RUNTIME_METHODS='["ccall","cwrap","allocateUTF8","UTF8ToString"]' \
+          -s EXPORTED_RUNTIME_METHODS='["ccall","cwrap","stringToUTF8","UTF8ToString"]' \
           -s ALLOW_MEMORY_GROWTH=1 \
           -s INITIAL_MEMORY=33554432 \
           -s MAXIMUM_MEMORY=2147483648 \
@@ -30,82 +24,44 @@ EMFLAGS = -s WASM=1 \
           -s EXPORT_NAME='ConvolutionModule' \
           -s ENVIRONMENT='web' \
           -s SINGLE_FILE=0 \
-          -s WASM_ASYNC_COMPILATION=1 \
-          -s ERROR_ON_UNDEFINED_SYMBOLS=0 \
           -O3
 
 # Source files
-FORTRAN_SOURCES = $(FORTRAN_DIR)/constants.f90 \
-                  $(FORTRAN_DIR)/fft_module.f90 \
-                  $(FORTRAN_DIR)/impulse_response.f90 \
-                  $(FORTRAN_DIR)/convolution_reverb.f90
-
-C_SOURCES = $(C_DIR)/wasm_bridge.c
-
-# Object files
-FORTRAN_OBJECTS = $(OBJ_DIR)/constants.o \
-                  $(OBJ_DIR)/fft_module.o \
-                  $(OBJ_DIR)/impulse_response.o \
-                  $(OBJ_DIR)/convolution_reverb.o
-
-C_OBJECTS = $(OBJ_DIR)/wasm_bridge.o
+C_SOURCES = $(C_DIR)/wasm_bridge.c \
+            $(C_DIR)/convolution_engine.c
 
 # Web files to copy
 WEB_FILES = $(WEB_DIR)/index.html \
             $(WEB_DIR)/style.css \
-            $(WEB_DIR)/app.js \
             $(JS_DIR)/convolution-module.js \
             $(JS_DIR)/audio-processor.js
 
 # Target files
-FORTRAN_LIB = $(OBJ_DIR)/libconvolution.a
 WASM_TARGET = $(BUILD_DIR)/convolution_reverb.js
 
 # Default target
-all: $(WASM_TARGET) copy_web_files
+all: $(WASM_TARGET) copy_files
 
-# Create directories
-$(OBJ_DIR):
-	@mkdir -p $(OBJ_DIR)
+# Create build directory
+$(BUILD_DIR):
+	@mkdir -p $(BUILD_DIR)
 
-# Fortran compilation rules (order matters for modules)
-$(OBJ_DIR)/constants.o: $(FORTRAN_DIR)/constants.f90 | $(OBJ_DIR)
-	@echo "Compiling constants.f90..."
-	$(FC) $(FFLAGS) -o $@ $<
-
-$(OBJ_DIR)/fft_module.o: $(FORTRAN_DIR)/fft_module.f90 $(OBJ_DIR)/constants.o | $(OBJ_DIR)
-	@echo "Compiling fft_module.f90..."
-	$(FC) $(FFLAGS) -o $@ $<
-
-$(OBJ_DIR)/impulse_response.o: $(FORTRAN_DIR)/impulse_response.f90 $(OBJ_DIR)/constants.o | $(OBJ_DIR)
-	@echo "Compiling impulse_response.f90..."
-	$(FC) $(FFLAGS) -o $@ $<
-
-$(OBJ_DIR)/convolution_reverb.o: $(FORTRAN_DIR)/convolution_reverb.f90 $(OBJ_DIR)/constants.o $(OBJ_DIR)/fft_module.o $(OBJ_DIR)/impulse_response.o | $(OBJ_DIR)
-	@echo "Compiling convolution_reverb.f90..."
-	$(FC) $(FFLAGS) -o $@ $<
-
-# Create static library from Fortran objects
-$(FORTRAN_LIB): $(FORTRAN_OBJECTS)
-	@echo "Creating Fortran static library..."
-	$(AR) $(ARFLAGS) $@ $^
-
-# C compilation
-$(OBJ_DIR)/wasm_bridge.o: $(C_DIR)/wasm_bridge.c $(C_DIR)/wasm_bridge.h | $(OBJ_DIR)
-	@echo "Compiling wasm_bridge.c..."
-	$(CC) $(CFLAGS) -c -o $@ $<
-
-# Link to WebAssembly
-$(WASM_TARGET): $(C_OBJECTS) $(FORTRAN_LIB)
-	@echo "Linking WebAssembly module..."
-	$(CC) $(CFLAGS) $(EMFLAGS) -o $@ $(C_OBJECTS) $(FORTRAN_LIB)
-	@echo "WebAssembly module created successfully!"
+# Compile to WebAssembly
+$(WASM_TARGET): $(C_SOURCES) | $(BUILD_DIR)
+	@echo "Compiling to WebAssembly..."
+	$(CC) $(CFLAGS) $(EMFLAGS) $(C_SOURCES) -o $@
+	@echo "WebAssembly compilation complete!"
 
 # Copy web files
-copy_web_files: $(WASM_TARGET)
+copy_files: $(WASM_TARGET)
 	@echo "Copying web files..."
 	@cp $(WEB_FILES) $(BUILD_DIR)/
-	@echo "Creating test.html..."
+	@echo "Creating .htaccess..."
+	@echo 'AddType application/wasm .wasm' > $(BUILD_DIR)/.htaccess
+	@echo '<FilesMatch "\.(wasm)$$">' >> $(BUILD_DIR)/.htaccess
+	@echo '    Header set Access-Control-Allow-Origin "*"' >> $(BUILD_DIR)/.htaccess
+	@echo '</FilesMatch>' >> $(BUILD_DIR)/.htaccess
+	@echo "Creating test page..."
 	@cat > $(BUILD_DIR)/test.html <<EOF
 <!DOCTYPE html>
 <html>
@@ -122,7 +78,7 @@ copy_web_files: $(WASM_TARGET)
             try {
                 const processor = new ConvolutionProcessor();
                 await processor.initialize('./', 48000);
-                document.getElementById('status').textContent = 'Module loaded successfully! Version: ' + processor.getVersion();
+                document.getElementById('status').textContent = 'Module loaded! Version: ' + processor.getVersion();
             } catch (error) {
                 document.getElementById('status').textContent = 'Error: ' + error.message;
             }
@@ -138,36 +94,38 @@ clean:
 	@echo "Cleaning build directory..."
 	@rm -rf $(BUILD_DIR)
 
-# Install target
+# Install (deploy) target
 install: all
-	@echo "Installing to /usr/local/share/convolution-reverb..."
-	@mkdir -p /usr/local/share/convolution-reverb
-	@cp -r $(BUILD_DIR)/* /usr/local/share/convolution-reverb/
+	@echo "Deploying to server..."
+	@bash scripts/build-c.sh --deploy
 
 # Development server
 serve: all
 	@echo "Starting development server on http://localhost:8000"
 	@cd $(BUILD_DIR) && python3 -m http.server 8000
 
+# Check prerequisites
+check:
+	@echo "Checking prerequisites..."
+	@which emcc > /dev/null || (echo "Error: Emscripten not found!" && exit 1)
+	@echo "✓ Emscripten found: $$(emcc --version | head -n1)"
+
 # Help
 help:
-	@echo "Convolution Reverb WebAssembly Makefile"
+	@echo "Convolution Reverb WebAssembly Makefile (C-only)"
 	@echo ""
 	@echo "Targets:"
-	@echo "  all      - Build WebAssembly module and copy web files (default)"
+	@echo "  all      - Build WebAssembly module (default)"
 	@echo "  clean    - Remove build directory"
-	@echo "  install  - Install to system directory"
 	@echo "  serve    - Start development server"
+	@echo "  install  - Deploy to production server"
+	@echo "  check    - Check prerequisites"
 	@echo "  help     - Show this help message"
-	@echo ""
-	@echo "Variables:"
-	@echo "  FC       - Fortran compiler (default: gfortran)"
-	@echo "  CC       - C/Emscripten compiler (default: emcc)"
 	@echo ""
 	@echo "Usage:"
 	@echo "  make              - Build everything"
 	@echo "  make clean        - Clean build"
-	@echo "  make serve        - Build and start server"
-	@echo "  make FC=flang     - Build with flang compiler"
+	@echo "  make serve        - Build and test locally"
+	@echo "  make install      - Build and deploy"
 
-.PHONY: all clean install serve help copy_web_files
+.PHONY: all clean install serve check help copy_files
