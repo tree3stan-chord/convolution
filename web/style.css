@@ -558,3 +558,10 @@ select:focus-visible {
     background: #1e1e2e;
     color: #cad3f5;
 }
+
+.subtitle {
+    text-align: center;
+    color: #90e0ef;
+    font-size: 1.2em;
+    margin-bottom: 20px;
+}

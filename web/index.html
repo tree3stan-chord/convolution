@@ -10,6 +10,7 @@
 <body>
     <div class="container">
         <h1>🤷‍♂️ convolution 🤷‍♂️</h1>
+        <p class="subtitle">Explore Convolution Reverb Processing</p>
         
         <div id="status" class="status ready">
             <span>Click "Start Live Input" to begin</span>
@@ -73,9 +74,10 @@
 
         <div class="action-buttons">
             <button class="button primary" id="liveInputButton">Start Live Input</button>
-            <button class="button primary" id="processButton" disabled>Process Audio</button>
+            <button class="button primary" id="processButton" disabled>Process & Play</button>
             <button class="button secondary" id="loadAudioButton">Load Audio File</button>
             <button class="button secondary" id="resetButton">Reset Parameters</button>
+            <button class="button secondary" id="debugButton" style="display:none;">Debug Process</button>
         </div>
 
         <div class="preloaded-audio" style="margin-top: 20px;">
@@ -149,6 +151,17 @@
             });
             document.getElementById('resetButton').addEventListener('click', resetParameters);
             document.getElementById('loadPreloadedButton').addEventListener('click', loadPreloadedAudio);
+            
+            // Add debug button handler (activate with Ctrl+D)
+            document.addEventListener('keydown', (e) => {
+                if (e.ctrlKey && e.key === 'd') {
+                    e.preventDefault();
+                    const debugBtn = document.getElementById('debugButton');
+                    debugBtn.style.display = debugBtn.style.display === 'none' ? 'inline-block' : 'none';
+                }
+            });
+            
+            document.getElementById('debugButton').addEventListener('click', debugProcessing);
             
             // Setup file input
             document.getElementById('audioFileInput').addEventListener('change', handleFileSelect);
@@ -424,6 +437,69 @@
             }
         }
 
+        // Debug processing function
+        function debugProcessing() {
+            if (!currentBuffer || !window.processor) {
+                console.error('No buffer loaded or processor not initialized');
+                return;
+            }
+            
+            console.log('=== DEBUG PROCESSING ===');
+            console.log('Processor initialized:', window.processor.initialized);
+            console.log('Current parameters:');
+            const params = ['roomSize', 'decayTime', 'preDelay', 'damping', 'lowFreq', 'diffusion', 'mix', 'earlyReflections'];
+            params.forEach(param => {
+                const slider = document.getElementById(param);
+                if (slider) {
+                    console.log(`  ${param}: ${slider.value}`);
+                }
+            });
+            
+            // Test with a simple signal
+            const testLength = 48000; // 1 second
+            const testSignal = new Float32Array(testLength);
+            
+            // Create a click at the beginning
+            testSignal[0] = 1.0;
+            testSignal[1] = -1.0;
+            
+            console.log('Processing test click signal...');
+            const testOutput = window.processor.processAudio(testSignal);
+            
+            // Check if we got reverb
+            let hasReverb = false;
+            let maxValue = 0;
+            for (let i = 1000; i < testOutput.length; i++) {
+                const val = Math.abs(testOutput[i]);
+                maxValue = Math.max(maxValue, val);
+                if (val > 0.001) {
+                    hasReverb = true;
+                }
+            }
+            
+            console.log('Test signal max value after 1000 samples:', maxValue);
+            console.log('Has reverb tail:', hasReverb);
+            
+            // Now test with actual audio
+            console.log('\nProcessing actual audio...');
+            const input = currentBuffer.getChannelData(0);
+            const smallChunk = input.slice(0, 4096); // Just first 4096 samples
+            const output = window.processor.processAudio(smallChunk);
+            
+            // Compare input and output
+            let inputMax = 0;
+            let outputMax = 0;
+            for (let i = 0; i < smallChunk.length; i++) {
+                inputMax = Math.max(inputMax, Math.abs(smallChunk[i]));
+                outputMax = Math.max(outputMax, Math.abs(output[i]));
+            }
+            
+            console.log('Input max:', inputMax);
+            console.log('Output max:', outputMax);
+            console.log('Output/Input ratio:', outputMax / inputMax);
+            console.log('=== END DEBUG ===');
+        }
+
         // Toggle process audio
         function toggleProcessAudio() {
             if (isPlaying) {
@@ -440,17 +516,57 @@
             try {
                 updateStatus('loading', 'Processing audio...');
                 
+                // Get the audio data as Float32Array
                 const input = currentBuffer.getChannelData(0);
-                const output = window.processor.processAudio(input);
+                const totalSamples = input.length;
+                console.log('Processing audio file:', totalSamples, 'samples at', currentBuffer.sampleRate, 'Hz');
                 
+                // Check current mix level
+                const mixSlider = document.getElementById('mix');
+                console.log('Current mix level:', mixSlider.value, '%');
+                
+                // Process in smaller chunks to avoid feedback issues
+                const chunkSize = 4096; // Small chunks like real-time processing
+                const output = new Float32Array(totalSamples);
+                
+                // Clear the convolution buffer by processing some silence first
+                const silence = new Float32Array(chunkSize);
+                window.processor.processAudio(silence);
+                
+                // Process the audio in chunks
+                for (let i = 0; i < totalSamples; i += chunkSize) {
+                    const end = Math.min(i + chunkSize, totalSamples);
+                    const chunk = input.slice(i, end);
+                    
+                    // Process this chunk
+                    const processedChunk = window.processor.processAudio(chunk);
+                    
+                    // Copy to output
+                    for (let j = 0; j < processedChunk.length; j++) {
+                        if (i + j < totalSamples) {
+                            output[i + j] = processedChunk[j];
+                        }
+                    }
+                    
+                    // Update progress
+                    if (i % (chunkSize * 10) === 0) {
+                        const progress = Math.round((i / totalSamples) * 100);
+                        updateStatus('loading', `Processing audio... ${progress}%`);
+                    }
+                }
+                
+                console.log('Processing complete');
+                
+                // Create output buffer
                 const outputBuffer = audioContext.createBuffer(1, output.length, currentBuffer.sampleRate);
                 outputBuffer.getChannelData(0).set(output);
                 
+                // Play the processed buffer
                 playBuffer(outputBuffer);
-                updateStatus('ready', 'Playing processed audio');
+                updateStatus('ready', 'Playing processed audio with reverb');
             } catch (error) {
                 console.error('Processing error:', error);
-                updateStatus('error', 'Error processing audio');
+                updateStatus('error', 'Error processing audio: ' + error.message);
             }
         }
 

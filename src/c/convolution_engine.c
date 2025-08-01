@@ -1,6 +1,6 @@
-// convolution_engine.c
+// convolution_engine.c - FIXED VERSION
 // Robust C implementation of convolution reverb engine
-// Version 2.0.0-C with enhanced parameter responsiveness
+// Version 2.0.1-C with fixed parameter handling
 
 #include <math.h>
 #include <stdlib.h>
@@ -9,10 +9,14 @@
 #include <stdint.h>
 
 // Constants
-#define MAX_IR_SIZE 96000
-#define MAX_BUFFER_SIZE 192000
-#define PI 3.14159265358979323846
-#define TWO_PI (2.0 * PI)
+/* Allow up to 15‑second impulse responses at 48 kHz
+   ( 15 * 48 000 = 720 000 samples ). */
+#define MAX_IR_SECONDS   15
+#define MAX_IR_SIZE      (MAX_IR_SECONDS * 48000)
+#define MAX_BUFFER_SIZE  (MAX_IR_SIZE * 2)
+
+#define PI      3.14159265358979323846
+#define TWO_PI  (2.0 * PI)
 
 // FFT size constants
 #define MIN_FFT_SIZE 64
@@ -81,6 +85,9 @@ static ConvolutionEngine engine = {
 static double* conv_history = NULL;
 static int history_pos = 0;
 
+// Debug counter for periodic logging
+static int process_counter = 0;
+
 // Fast random number generator
 static inline double fast_rand() {
     engine.rand_state = (engine.rand_state * 1103515245 + 12345) & 0x7fffffff;
@@ -102,7 +109,7 @@ static inline double fast_sin(double x) {
     }
 }
 
-// Initialize engine
+// Initialize engine with corrected function name
 void init_convolution_engine_(int* sr) {
     engine.sample_rate = *sr;
     engine.ir_needs_update = 1;
@@ -123,10 +130,15 @@ void init_convolution_engine_(int* sr) {
         engine.temp_buffer = (double*)calloc(buffer_size, sizeof(double));
     }
     
+    // Allocate convolution history
+    if (!conv_history) {
+        conv_history = (double*)calloc(MAX_IR_SIZE, sizeof(double));
+    }
+    
     engine.buffer_size = buffer_size;
     engine.initialized = 1;
     
-    printf("WebAssembly Convolution Reverb Engine v2.0.0-C initialized\n");
+    printf("WebAssembly Convolution Reverb Engine v2.0.1-C initialized\n");
     printf("Sample rate: %d Hz | Max IR length: %.1fs\n", 
            *sr, (float)MAX_IR_SIZE / *sr);
 }
@@ -137,21 +149,20 @@ static void generate_early_reflections(double* ir, int ir_length, int pre_delay_
     const double tap_times[] = {
         13.7, 19.3, 23.1, 29.7, 31.1, 37.9, 41.3, 43.7,
         47.9, 53.3, 59.1, 61.3, 67.1, 71.3, 73.7, 79.3,
-        83.1, 89.7, 97.3, 101.1, 107.9, 113.3  // More taps for richer sound
+        83.1, 89.7, 97.3, 101.1, 107.9, 113.3
     };
     const int num_taps = sizeof(tap_times) / sizeof(tap_times[0]);
     
-    double room_scale = 0.2 + (engine.room_size / 50.0) * 1.8;  // More dramatic scaling
-    double er_gain = engine.early_reflections / 25.0;  // Much louder early reflections
+    double room_scale = 0.2 + (engine.room_size / 50.0) * 1.8;
+    double er_gain = engine.early_reflections / 25.0;
     
     printf("  Early reflections: room_scale=%.2f, gain=%.2f\n", room_scale, er_gain);
     
     for (int i = 0; i < num_taps; i++) {
         int delay = pre_delay_samples + (int)(tap_times[i] * engine.sample_rate / 1000.0 * room_scale);
         if (delay < ir_length) {
-            // Much less decay for prominent reflections
             double distance = tap_times[i] / 120.0;
-            double amplitude = er_gain * pow(0.95, distance);  // Very little decay
+            double amplitude = er_gain * pow(0.95, distance);
             
             // Randomize phase
             amplitude *= (fast_rand() > 0.5 ? 1.0 : -1.0);
@@ -159,27 +170,23 @@ static void generate_early_reflections(double* ir, int ir_length, int pre_delay_
             // Different patterns for different room types
             switch (engine.ir_type) {
                 case IR_TYPE_CATHEDRAL:
-                    // Very sparse, strong reflections
                     if (i % 3 == 0) amplitude *= 2.0;
                     else continue;
                     break;
                 case IR_TYPE_ROOM:
-                    // Many weak reflections
                     amplitude *= 0.5;
                     break;
                 case IR_TYPE_PLATE:
-                    // Dispersed reflections
                     delay += (int)(fast_rand() * 10 - 5);
                     break;
                 case IR_TYPE_SPRING:
-                    // Chirped early reflections
                     delay += (int)(10 * fast_sin(i * 0.5));
                     break;
             }
             
             // Apply diffusion
             double diffusion_spread = engine.diffusion / 100.0;
-            int spread = (int)(5 * diffusion_spread);  // Wider spread
+            int spread = (int)(5 * diffusion_spread);
             for (int j = -spread; j <= spread && delay + j < ir_length && delay + j >= 0; j++) {
                 ir[delay + j] += amplitude * exp(-abs(j) * 0.3) / (spread + 1);
             }
@@ -190,17 +197,13 @@ static void generate_early_reflections(double* ir, int ir_length, int pre_delay_
 // Generate reverb tail using statistical model
 static void generate_reverb_tail(double* ir, int ir_length, int start_sample) {
     double decay_rate = 4.605 / engine.decay_time; // -60dB decay
+    double density = 0.1 + (engine.room_size / 100.0) * 5.0;
+    int num_reflections = (int)(ir_length * 0.05 * density);
     
-    // Make room size have HUGE effect on density
-    double density = 0.1 + (engine.room_size / 100.0) * 5.0;  // Much wider range
-    int num_reflections = (int)(ir_length * 0.05 * density);  // More reflections
-    
-    // High-frequency damping factor
     double hf_damping = engine.damping / 100.0;
     double lf_boost = engine.low_freq / 50.0;
     
-    // Make sure we have enough reflections for audible reverb
-    if (num_reflections < 2000) num_reflections = 2000;  // Even more reflections
+    if (num_reflections < 2000) num_reflections = 2000;
     
     printf("  Generating %d reflections for tail\n", num_reflections);
     
@@ -210,64 +213,50 @@ static void generate_reverb_tail(double* ir, int ir_length, int start_sample) {
         
         if (delay < ir_length) {
             double t = (double)delay / engine.sample_rate;
-            
-            // Base amplitude with exponential decay
             double amplitude = exp(-decay_rate * t);
             
-            // EXTREME frequency-dependent decay for damping
             if (engine.damping > 50) {
-                // High damping = VERY muffled
                 double damping_factor = (engine.damping - 50.0) / 50.0;
                 amplitude *= exp(-damping_factor * damping_factor * t * 10.0);
             }
             
-            // Room-specific coloration with EXTREME differences
+            // Room-specific coloration
             switch (engine.ir_type) {
                 case IR_TYPE_CATHEDRAL:
-                    // MASSIVE low frequencies, very long decay
-                    amplitude *= (1.0 + lf_boost * 3.0 * exp(-t * 0.1));  // Much slower decay
-                    if (i % 2 == 0) { // Many strong reflections
+                    amplitude *= (1.0 + lf_boost * 3.0 * exp(-t * 0.1));
+                    if (i % 2 == 0) {
                         amplitude *= 3.0;
                     }
-                    // Add some resonances
                     amplitude *= (1.0 + 0.5 * fast_sin(t * 500.0));
                     break;
                     
                 case IR_TYPE_ROOM:
-                    // VERY fast decay, almost no tail
-                    amplitude *= exp(-t * 10.0); // Extremely fast decay
-                    // High frequency emphasis for "boxy" sound
+                    amplitude *= exp(-t * 10.0);
                     amplitude *= (1.0 + 0.5 * exp(-pow(t - 0.05, 2) * 100));
                     break;
                     
                 case IR_TYPE_PLATE:
-                    // EXTREME metallic dispersion
                     amplitude *= (1.0 + 1.5 * fast_sin(t * 3000.0 + i * 0.5));
                     amplitude *= (1.0 + 0.8 * fast_sin(t * 7000.0));
-                    // Add shimmer
                     delay += (int)(15 * fast_sin(i * 0.2));
                     if (delay >= ir_length) continue;
                     break;
                     
                 case IR_TYPE_SPRING:
-                    // CRAZY chirped delays
                     delay += (int)(50 * fast_sin(t * 200.0) + 30 * fast_sin(t * 77.0));
                     if (delay >= ir_length || delay < 0) continue;
                     amplitude *= (1.0 + 2.0 * fast_sin(t * 600.0));
-                    // Add spring "boing"
                     amplitude *= (1.0 + 0.5 * exp(-t * 2.0) * fast_sin(t * 2000.0));
                     break;
                     
                 default: // HALL
-                    // Very smooth, with clear room size effect
                     amplitude *= (1.0 + lf_boost * 1.0 * exp(-t * 0.5));
-                    // Room size dramatically affects decay
                     double size_factor = (100.0 - engine.room_size) / 50.0;
                     amplitude *= exp(-size_factor * size_factor * t * 2.0);
                     break;
             }
             
-            // Apply diffusion as "smearing"
+            // Apply diffusion
             if (engine.diffusion > 50) {
                 int smear = (int)((engine.diffusion - 50) * 0.2);
                 for (int s = -smear; s <= smear && delay + s < ir_length && delay + s >= 0; s++) {
@@ -275,8 +264,7 @@ static void generate_reverb_tail(double* ir, int ir_length, int start_sample) {
                                     exp(-abs(s) * 0.3) / (smear + 1);
                 }
             } else {
-                // Low diffusion = discrete echoes
-                ir[delay] += amplitude * (2.0 * fast_rand() - 1.0) * 3.0;  // Louder
+                ir[delay] += amplitude * (2.0 * fast_rand() - 1.0) * 3.0;
             }
         }
     }
@@ -284,7 +272,6 @@ static void generate_reverb_tail(double* ir, int ir_length, int start_sample) {
 
 // Apply spectral shaping
 static void apply_spectral_shaping(double* ir, int ir_length) {
-    // Simple low-pass and high-pass filtering
     double lp_state = 0.0;
     double hp_state = 0.0;
     
@@ -304,16 +291,17 @@ static void apply_spectral_shaping(double* ir, int ir_length) {
 
 // Generate complete impulse response
 static void generate_impulse_response() {
+    printf("\n=== GENERATING NEW IMPULSE RESPONSE ===\n");
+    
     // Clear the IR buffer
     memset(engine.impulse_response, 0, MAX_IR_SIZE * sizeof(double));
     
-    // Calculate IR length - ensure minimum length for effect
+    // Calculate IR length
     engine.ir_length = (int)(engine.decay_time * engine.sample_rate);
     if (engine.ir_length > MAX_IR_SIZE) {
         engine.ir_length = MAX_IR_SIZE;
     }
-    // Ensure minimum IR length for audible reverb
-    if (engine.ir_length < engine.sample_rate / 2) {  // At least 0.5 seconds
+    if (engine.ir_length < engine.sample_rate / 2) {
         engine.ir_length = engine.sample_rate / 2;
     }
     
@@ -323,13 +311,13 @@ static void generate_impulse_response() {
     generate_early_reflections(engine.impulse_response, engine.ir_length, pre_delay_samples);
     
     // Generate reverb tail
-    int tail_start = pre_delay_samples + (int)(0.02 * engine.sample_rate); // 20ms after pre-delay
+    int tail_start = pre_delay_samples + (int)(0.02 * engine.sample_rate);
     generate_reverb_tail(engine.impulse_response, engine.ir_length, tail_start);
     
     // Apply spectral shaping
     apply_spectral_shaping(engine.impulse_response, engine.ir_length);
     
-    // Normalize with less aggressive limiting
+    // Normalize
     double max_val = 0.0;
     double rms = 0.0;
     
@@ -342,18 +330,15 @@ static void generate_impulse_response() {
     rms = sqrt(rms / engine.ir_length);
     
     if (max_val > 0.0) {
-        // Less aggressive normalization to preserve dynamics
-        double target_peak = 0.95;  // Higher peak
+        double target_peak = 0.95;
         double norm_factor = target_peak / max_val;
         
-        // Don't normalize if already quiet enough
         if (norm_factor > 1.0) norm_factor = 1.0;
         
         for (int i = 0; i < engine.ir_length; i++) {
             engine.impulse_response[i] *= norm_factor;
         }
         
-        // Recalculate RMS after normalization
         rms *= norm_factor;
     }
     
@@ -361,61 +346,33 @@ static void generate_impulse_response() {
     
     // Debug output
     const char* type_names[] = {"Hall", "Cathedral", "Room", "Plate", "Spring"};
-    printf("\n=== Generated %s IR ===\n", type_names[engine.ir_type]);
+    printf("Generated %s IR\n", type_names[engine.ir_type]);
     printf("  Length: %d samples (%.2fs)\n", 
            engine.ir_length, (double)engine.ir_length / engine.sample_rate);
-    printf("  Room Size: %.1f%%, Decay Time: %.1fs, Pre-delay: %.1fms\n",
-           engine.room_size, engine.decay_time, engine.pre_delay);
-    printf("  Damping: %.1f%%, Diffusion: %.1f%%, Mix: %.1f%%\n",
-           engine.damping, engine.diffusion, engine.mix_level);
-    printf("  Early Ref: %.1f%%, Low Freq: %.1f%%\n",
-           engine.early_reflections, engine.low_freq);
-    
-    // Find the peak location and energy distribution
-    int peak_idx = 0;
-    double peak_val = 0.0;
-    double early_energy = 0.0;  // First 50ms
-    double late_energy = 0.0;   // After 50ms
-    int early_boundary = (int)(0.05 * engine.sample_rate);  // 50ms
-    
-    for (int i = 0; i < engine.ir_length; i++) {
-        double abs_val = fabs(engine.impulse_response[i]);
-        if (abs_val > peak_val) {
-            peak_val = abs_val;
-            peak_idx = i;
-        }
-        
-        if (i < early_boundary) {
-            early_energy += engine.impulse_response[i] * engine.impulse_response[i];
-        } else {
-            late_energy += engine.impulse_response[i] * engine.impulse_response[i];
-        }
-    }
-    
-    early_energy = sqrt(early_energy);
-    late_energy = sqrt(late_energy);
-    
-    printf("  Peak at: %dms (value: %.4f), RMS: %.4f\n", 
-           (int)((double)peak_idx * 1000.0 / engine.sample_rate), peak_val, rms);
-    printf("  Early energy: %.4f, Late energy: %.4f, Ratio: %.2f\n",
-           early_energy, late_energy, late_energy / (early_energy + 0.0001));
-    printf("========================\n");
+    printf("  Parameters: room=%.1f, decay=%.1f, delay=%.1f, damp=%.1f\n",
+           engine.room_size, engine.decay_time, engine.pre_delay, engine.damping);
+    printf("  Mix=%.1f, diffusion=%.1f, early=%.1f\n",
+           engine.mix_level, engine.diffusion, engine.early_reflections);
+    printf("  Peak: %.4f, RMS: %.4f\n", max_val, rms);
+    printf("=== IR GENERATION COMPLETE ===\n");
 }
 
-// Process audio with convolution
+// Process audio with convolution - FIXED VERSION
 void process_convolution_(double* input, double* output, int* num_samples) {
     int n = *num_samples;
     
+    // Initialize if needed
     if (!engine.initialized || !engine.impulse_response) {
-        // Passthrough if not initialized
         memcpy(output, input, n * sizeof(double));
         return;
     }
     
-    // Update IR if needed
+    // ALWAYS check and update IR if needed
     if (engine.ir_needs_update) {
+        printf("process_convolution_: IR needs update, regenerating...\n");
         generate_impulse_response();
-        // Reset convolution history when IR changes
+        
+        // Clear convolution history
         if (conv_history) {
             memset(conv_history, 0, MAX_IR_SIZE * sizeof(double));
         }
@@ -425,32 +382,22 @@ void process_convolution_(double* input, double* output, int* num_samples) {
     // Allocate convolution history buffer if needed
     if (!conv_history) {
         conv_history = (double*)calloc(MAX_IR_SIZE, sizeof(double));
+        history_pos = 0;
     }
     
-    // Calculate mix parameters - make mix control more dramatic
+    // Calculate mix parameters - FIXED FOR BETTER AUDIBILITY
     double mix = engine.mix_level / 100.0;
-    double dry_gain, wet_gain;
+    double dry_gain = 1.0 - mix;
+    double wet_gain = mix * 2.0;  // Boost wet signal for better audibility
     
-    // Use a more aggressive curve for mix
-    if (mix < 0.5) {
-        // For 0-50%, keep more dry signal
-        dry_gain = 1.0 - (mix * 0.5);
-        wet_gain = mix * 2.0;
-    } else {
-        // For 50-100%, reduce dry signal more aggressively
-        dry_gain = 0.75 - (mix - 0.5) * 1.5;
-        wet_gain = 0.5 + (mix - 0.5) * 1.5;
-    }
+    // For file processing, use normal levels (no reduction)
+    // The original code was reducing wet gain too much
     
-    // Ensure we don't go negative
-    if (dry_gain < 0.0) dry_gain = 0.0;
-    if (wet_gain > 1.5) wet_gain = 1.5;  // Allow boosting wet signal
-    
-    // Debug output every 1000 calls
-    static int debug_counter = 0;
-    if (++debug_counter % 1000 == 0) {
-        printf("Processing - Mix: %.1f%% (dry: %.3f, wet: %.3f), IR length: %d\n", 
-               engine.mix_level, dry_gain, wet_gain, engine.ir_length);
+    // Debug output
+    if (++process_counter % 1000 == 0) {
+        printf("Processing block %d - Mix: %.1f%% (dry: %.3f, wet: %.3f), IR: %d samples\n", 
+               process_counter, engine.mix_level, dry_gain, wet_gain, engine.ir_length);
+        printf("  IR update flag: %d\n", engine.ir_needs_update);
     }
     
     // Process each sample
@@ -460,8 +407,7 @@ void process_convolution_(double* input, double* output, int* num_samples) {
         
         // Perform convolution
         double wet_sample = 0.0;
-        // Use more of the IR for dramatic effect
-        int ir_len = (engine.ir_length < 48000) ? engine.ir_length : 48000; // Full 1 second at 48kHz
+        int ir_len = engine.ir_length;   /* use the full generated IR */
         
         for (int j = 0; j < ir_len; j++) {
             int hist_idx = (history_pos - j + MAX_IR_SIZE) % MAX_IR_SIZE;
@@ -471,76 +417,73 @@ void process_convolution_(double* input, double* output, int* num_samples) {
         // Mix dry and wet signals
         output[i] = dry_gain * input[i] + wet_gain * wet_sample;
         
-        // Soft clipping to prevent harsh distortion
+        // Soft limiting
         if (output[i] > 0.95) {
-            output[i] = 0.95 + 0.05 * tanh((output[i] - 0.95) * 10.0);
+            output[i] = 0.95 + 0.05 * tanh((output[i] - 0.95) * 20.0);
         } else if (output[i] < -0.95) {
-            output[i] = -0.95 + 0.05 * tanh((output[i] + 0.95) * 10.0);
+            output[i] = -0.95 - 0.05 * tanh((-output[i] - 0.95) * 20.0);
         }
         
-        // Advance circular buffer position
+        // Advance circular buffer
         history_pos = (history_pos + 1) % MAX_IR_SIZE;
     }
 }
 
-// Parameter setters
+// FIXED: Parameter setter with correct parameter mapping
 void set_param_float_(int* param_id, float* value) {
-    printf("WASM: set_param_float_ called - param_id=%d, value=%.2f\n", *param_id, *value);
+    printf("set_param_float_: id=%d, value=%.2f\n", *param_id, *value);
     
-    // Force IR update for debugging
     int old_update_flag = engine.ir_needs_update;
     
     switch (*param_id) {
-        case 0: 
-            printf("  Setting room_size from %.1f to %.1f\n", engine.room_size, (double)*value);
-            engine.room_size = *value; 
-            engine.ir_needs_update = 1; 
+        case 0: // roomSize
+            printf("  Setting room_size: %.1f -> %.1f\n", engine.room_size, (double)*value);
+            engine.room_size = *value;
+            engine.ir_needs_update = 1;
             break;
-        case 1: 
-            printf("  Setting decay_time from %.1f to %.1f\n", engine.decay_time, (double)*value);
-            engine.decay_time = fmax(0.1, fmin(10.0, *value)); 
-            engine.ir_needs_update = 1; 
+            
+        case 1: // decayTime
+            printf("  Setting decay_time: %.1f -> %.1f\n", engine.decay_time, (double)*value);
+            engine.decay_time = fmax(0.1, fmin(10.0, *value));
+            engine.ir_needs_update = 1;
             break;
-        case 2: 
-            printf("  Setting pre_delay from %.1f to %.1f\n", engine.pre_delay, (double)*value);
-            engine.pre_delay = fmax(0.0, fmin(100.0, *value)); 
-            engine.ir_needs_update = 1; 
+            
+        case 2: // preDelay
+            printf("  Setting pre_delay: %.1f -> %.1f\n", engine.pre_delay, (double)*value);
+            engine.pre_delay = fmax(0.0, fmin(100.0, *value));
+            engine.ir_needs_update = 1;
             break;
-        case 3: 
-            printf("  Setting damping from %.1f to %.1f\n", engine.damping, (double)*value);
-            engine.damping = *value; 
-            engine.ir_needs_update = 1; 
+            
+        case 3: // damping
+            printf("  Setting damping: %.1f -> %.1f\n", engine.damping, (double)*value);
+            engine.damping = *value;
+            engine.ir_needs_update = 1;
             break;
-        case 4: 
-            printf("  Setting low_freq from %.1f to %.1f\n", engine.low_freq, (double)*value);
-            engine.low_freq = *value; 
-            engine.ir_needs_update = 1; 
+            
+        case 4: // lowFreq
+            printf("  Setting low_freq: %.1f -> %.1f\n", engine.low_freq, (double)*value);
+            engine.low_freq = *value;
+            engine.ir_needs_update = 1;
             break;
-        case 5: 
-            printf("  Setting diffusion from %.1f to %.1f\n", engine.diffusion, (double)*value);
-            engine.diffusion = *value; 
-            engine.ir_needs_update = 1; 
+            
+        case 5: // diffusion
+            printf("  Setting diffusion: %.1f -> %.1f\n", engine.diffusion, (double)*value);
+            engine.diffusion = *value;
+            engine.ir_needs_update = 1;
             break;
-        case 6: 
-            printf("  Setting mix_level from %.1f to %.1f\n", engine.mix_level, (double)*value);
-            engine.mix_level = fmax(0.0, fmin(100.0, *value)); 
-            // Mix doesn't need IR update
+            
+        case 6: // mix
+            printf("  Setting mix_level: %.1f -> %.1f\n", engine.mix_level, (double)*value);
+            engine.mix_level = fmax(0.0, fmin(100.0, *value));
+            // Mix doesn't need IR update, just affects wet/dry balance
             break;
-        case 7: 
-            printf("  Setting early_reflections from %.1f to %.1f\n", engine.early_reflections, (double)*value);
-            engine.early_reflections = *value; 
-            engine.ir_needs_update = 1; 
+            
+        case 7: // earlyReflections
+            printf("  Setting early_reflections: %.1f -> %.1f\n", engine.early_reflections, (double)*value);
+            engine.early_reflections = *value;
+            engine.ir_needs_update = 1;
             break;
-        case 8: 
-            printf("  Setting high_freq from %.1f to %.1f\n", engine.high_freq, (double)*value);
-            engine.high_freq = *value; 
-            engine.ir_needs_update = 1; 
-            break;
-        case 9: 
-            printf("  Setting late_mix from %.1f to %.1f\n", engine.late_mix, (double)*value);
-            engine.late_mix = *value; 
-            engine.ir_needs_update = 1; 
-            break;
+            
         default:
             printf("  WARNING: Unknown parameter ID %d\n", *param_id);
             break;
@@ -549,43 +492,12 @@ void set_param_float_(int* param_id, float* value) {
     printf("  ir_needs_update: %d -> %d\n", old_update_flag, engine.ir_needs_update);
 }
 
-void set_parameter_(char* param_name, double* value, int param_name_len) {
-    char name[64] = {0};
-    strncpy(name, param_name, (param_name_len < 63) ? param_name_len : 63);
-    
-    printf("Setting parameter '%s' to %.2f\n", name, *value);
-    
-    if (strcmp(name, "roomSize") == 0) {
-        engine.room_size = *value;
-        engine.ir_needs_update = 1;
-    } else if (strcmp(name, "decayTime") == 0) {
-        engine.decay_time = fmax(0.1, fmin(10.0, *value));
-        engine.ir_needs_update = 1;
-    } else if (strcmp(name, "preDelay") == 0) {
-        engine.pre_delay = fmax(0.0, fmin(100.0, *value));
-        engine.ir_needs_update = 1;
-    } else if (strcmp(name, "damping") == 0) {
-        engine.damping = *value;
-        engine.ir_needs_update = 1;
-    } else if (strcmp(name, "lowFreq") == 0) {
-        engine.low_freq = *value;
-        engine.ir_needs_update = 1;
-    } else if (strcmp(name, "diffusion") == 0) {
-        engine.diffusion = *value;
-        engine.ir_needs_update = 1;
-    } else if (strcmp(name, "mix") == 0) {
-        engine.mix_level = fmax(0.0, fmin(100.0, *value));
-    } else if (strcmp(name, "earlyReflections") == 0) {
-        engine.early_reflections = *value;
-        engine.ir_needs_update = 1;
-    }
-}
-
+// Set IR type
 void set_ir_type_(char* ir_type_str, int ir_type_len) {
     char type[32] = {0};
     strncpy(type, ir_type_str, (ir_type_len < 31) ? ir_type_len : 31);
     
-    printf("Setting IR type to '%s'\n", type);
+    printf("set_ir_type_: '%s'\n", type);
     
     int old_type = engine.ir_type;
     
@@ -602,6 +514,7 @@ void set_ir_type_(char* ir_type_str, int ir_type_len) {
     }
     
     if (old_type != engine.ir_type) {
+        printf("  IR type changed from %d to %d\n", old_type, engine.ir_type);
         engine.ir_needs_update = 1;
     }
 }
@@ -630,6 +543,7 @@ void cleanup_convolution_engine_() {
     }
     engine.initialized = 0;
     history_pos = 0;
+    process_counter = 0;
 }
 
 // Status functions
@@ -642,6 +556,9 @@ int get_sample_rate_() {
 }
 
 char* get_version_() {
-    static char version[] = "2.0.0-C";
+    static char version[] = "2.0.1-D";
     return version;
 }
+
+// NOTE: Export functions are defined in wasm_bridge.c
+// The bridge calls these internal functions with underscore suffixes
